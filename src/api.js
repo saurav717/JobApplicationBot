@@ -265,3 +265,29 @@ export async function getPlatformStatus(token) {
     if (!res.ok) throw new Error(`Platform status failed: ${res.status}`);
     return res.json();
 }
+
+/**
+ * List all known top tech companies available for public Workday scraping.
+ */
+export async function getTopCompanies() {
+    const res = await fetch(`${BASE_URL}/api/scraper/top-companies`);
+    if (!res.ok) throw new Error('Failed to fetch companies');
+    return res.json();
+}
+
+/**
+ * Trigger a background scrape of 50+ top tech companies via their public Workday portals.
+ */
+export async function scrapeTopCompanies(keywords = [], companies = null, limitPerCompany = 10) {
+    const res = await fetch(`${BASE_URL}/api/scraper/scrape-top-companies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            keywords: keywords.length > 0 ? keywords : ['software engineer', 'data scientist'],
+            limit_per_company: limitPerCompany,
+            companies,
+        }),
+    });
+    if (!res.ok) throw new Error('Failed to trigger top-companies scrape');
+    return res.json();
+}
