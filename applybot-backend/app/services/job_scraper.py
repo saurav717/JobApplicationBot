@@ -50,31 +50,40 @@ async def fetch_remotive(search: str = "") -> List[Dict[str, Any]]:
     Optionally filter by keyword search query.
     """
     categories = ["software-dev", "data", "devops-sysadmin"]
-    all_jobs = []
+
+    async def fetch_category(client: httpx.AsyncClient, cat: str) -> List[Dict[str, Any]]:
+        try:
+            params = {"category": cat, "limit": 20}
+            if search:
+                params["search"] = search
+            r = await client.get("https://remotive.com/api/remote-jobs", params=params)
+            r.raise_for_status()
+            data = r.json()
+            return [
+                {
+                    "title": item.get("title", ""),
+                    "company": item.get("company_name", ""),
+                    "location": item.get("candidate_required_location", "Remote"),
+                    "type": "Remote",
+                    "salary": item.get("salary", ""),
+                    "description": item.get("description", "")[:2000],
+                    "skills_required": item.get("tags", [])[:10],
+                    "apply_url": item.get("url", ""),
+                    "logo_url": item.get("company_logo", ""),
+                    "posted": item.get("publication_date", ""),
+                }
+                for item in data.get("jobs", [])
+            ]
+        except Exception as e:
+            print(f"[Remotive/{cat}] Error: {e}")
+            return []
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        for cat in categories:
-            try:
-                params = {"category": cat, "limit": 20}
-                if search:
-                    params["search"] = search
-                r = await client.get("https://remotive.com/api/remote-jobs", params=params)
-                r.raise_for_status()
-                data = r.json()
-                for item in data.get("jobs", []):
-                    all_jobs.append({
-                        "title": item.get("title", ""),
-                        "company": item.get("company_name", ""),
-                        "location": item.get("candidate_required_location", "Remote"),
-                        "type": "Remote",
-                        "salary": item.get("salary", ""),
-                        "description": item.get("description", "")[:2000],
-                        "skills_required": item.get("tags", [])[:10],
-                        "apply_url": item.get("url", ""),
-                        "logo_url": item.get("company_logo", ""),
-                        "posted": item.get("publication_date", ""),
-                    })
-            except Exception as e:
-                print(f"[Remotive/{cat}] Error: {e}")
+        results = await asyncio.gather(*[fetch_category(client, cat) for cat in categories])
+
+    all_jobs = []
+    for r in results:
+        all_jobs.extend(r)
     return all_jobs
 
 
@@ -157,16 +166,19 @@ async def run_resume_targeted_scrape(search_profile: Dict[str, Any]) -> int:
     total_stored = 0
     for i in range(0, len(unique_jobs), batch_size):
         batch = unique_jobs[i:i + batch_size]
+        texts = [
+            (f"{job.get('title','')} {job.get('company','')} {job.get('description','')[:300]} {' '.join(job.get('skills_required',[]))}".strip() or "job listing")
+            for job in batch
+        ]
+        embed_results = await asyncio.gather(*[embed_text(t) for t in texts], return_exceptions=True)
         valid_batch, vectors = [], []
-        for job in batch:
-            text = f"{job.get('title','')} {job.get('company','')} {job.get('description','')[:300]} {' '.join(job.get('skills_required',[]))}"
-            try:
-                vec = await embed_text(text.strip() or "job listing")
-                if vec and isinstance(vec, list) and len(vec) > 0:
-                    valid_batch.append(job)
-                    vectors.append(vec)
-            except Exception as e:
-                print(f"[Scraper] Embedding failed: {e}")
+        for job, vec in zip(batch, embed_results):
+            if isinstance(vec, Exception):
+                print(f"[Scraper] Embedding failed: {vec}")
+                continue
+            if vec and isinstance(vec, list) and len(vec) > 0:
+                valid_batch.append(job)
+                vectors.append(vec)
         if valid_batch:
             total_stored += store_jobs_batch(valid_batch, vectors)
 
@@ -213,18 +225,19 @@ async def run_scrape() -> int:
     total_stored = 0
     for i in range(0, len(unique_jobs), batch_size):
         batch = unique_jobs[i:i + batch_size]
-        valid_batch = []
-        vectors = []
-        for job in batch:
-            text = f"{job.get('title','')} {job.get('company','')} {job.get('description','')[:300]} {' '.join(job.get('skills_required',[]))}"
-            try:
-                vec = await embed_text(text.strip() or "job listing")
-                if vec and isinstance(vec, list) and len(vec) > 0:
-                    valid_batch.append(job)
-                    vectors.append(vec)
-            except Exception as e:
-                print(f"[Scraper] Embedding failed for job: {e}")
-                
+        texts = [
+            (f"{job.get('title','')} {job.get('company','')} {job.get('description','')[:300]} {' '.join(job.get('skills_required',[]))}".strip() or "job listing")
+            for job in batch
+        ]
+        embed_results = await asyncio.gather(*[embed_text(t) for t in texts], return_exceptions=True)
+        valid_batch, vectors = [], []
+        for job, vec in zip(batch, embed_results):
+            if isinstance(vec, Exception):
+                print(f"[Scraper] Embedding failed for job: {vec}")
+                continue
+            if vec and isinstance(vec, list) and len(vec) > 0:
+                valid_batch.append(job)
+                vectors.append(vec)
         if valid_batch:
             count = store_jobs_batch(valid_batch, vectors)
             total_stored += count
