@@ -4,9 +4,10 @@ import {
     ArrowRight, Building2, MapPin, Clock, TrendingUp, Filter, Search,
     User, Mail, Phone, FileText, GraduationCap, Link2, Linkedin, Github,
     Bot, CheckCircle2, AlertCircle, Loader2, Globe, Calendar, Cpu,
-    SlidersHorizontal, Briefcase
+    SlidersHorizontal, Briefcase, RefreshCw
 } from 'lucide-react';
-import { mockCompanies as initialCompanies, userProfile, llmOptions, continentData, timeOptions } from './data';
+import { searchJobsGrouped, generateForm } from './api';
+import { llmOptions, continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
     return (
@@ -23,8 +24,13 @@ function FormField({ label, value, icon: Icon, filled, className = '' }) {
     );
 }
 
-export default function JobBrowser({ onBack }) {
-    const [companies, setCompanies] = useState(initialCompanies);
+export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialLLM, onBack }) {
+    // API State
+    const [companies, setCompanies] = useState([]);
+    const [loadingJobs, setLoadingJobs] = useState(true);
+    const [error, setError] = useState('');
+
+    // UI Selection State
     const [selectedCompany, setSelectedCompany] = useState(null);
     const [selectedJob, setSelectedJob] = useState(null);
     const [selectedJobs, setSelectedJobs] = useState({});
@@ -32,24 +38,68 @@ export default function JobBrowser({ onBack }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [showOnlySelected, setShowOnlySelected] = useState(false);
     const [showFilters, setShowFilters] = useState(true);
-    const [selectedLLM, setSelectedLLM] = useState('claude-sonnet');
+
+    // Filters & Config
+    const [selectedLLM, setSelectedLLM] = useState(initialLLM || 'claude-sonnet');
     const [selectedContinents, setSelectedContinents] = useState(['north-america']);
     const [selectedCountries, setSelectedCountries] = useState(['usa', 'canada']);
     const [expandedContinents, setExpandedContinents] = useState({});
     const [postedWithin, setPostedWithin] = useState('30');
-    const [fillingStatus, setFillingStatus] = useState('idle');
-    const [showJD, setShowJD] = useState(false);
+
+    // Generating Form State
+    const [fillingStatus, setFillingStatus] = useState('idle'); // idle | filling | complete
+    const [formData, setFormData] = useState(null);
+
+    // Initial Load & Rescore
+    const loadJobs = async () => {
+        if (!resumeId) return;
+        setLoadingJobs(true);
+        setError('');
+        try {
+            // Note: In a real app we'd pass filters here to the API. 
+            // For now, we search with/without LLM reranking based strictly on our backend schema.
+            const response = await searchJobsGrouped(resumeId, {
+                limit: 100,
+                useLlmRerank: true // Force LLM rerank via Groq
+            });
+            // Map backend response { company: [...jobs] } to array format
+            const compArray = Object.entries(response).map(([name, jobs], index) => {
+                const totalJobs = jobs.length;
+                return {
+                    id: name.toLowerCase().replace(/\s+/g, '-'),
+                    name,
+                    logo: jobs[0]?.logo_url || `https://logo.clearbit.com/${name.toLowerCase().replace(/\s+/g, '')}.com`,
+                    industry: 'Tech',
+                    location: jobs[0]?.location || 'Various',
+                    openRoles: totalJobs,
+                    selected: index < 5, // auto-select first 5
+                    jobs: jobs
+                };
+            }).sort((a, b) => b.jobs[0]?.score - a.jobs[0]?.score);
+
+            setCompanies(compArray);
+            if (compArray.length > 0) setSelectedCompany(compArray[0]);
+        } catch (err) {
+            setError(err.message || 'Failed to fetch jobs.');
+        } finally {
+            setLoadingJobs(false);
+        }
+    };
+
+    // Load jobs when resumeId changes
+    useEffect(() => {
+        loadJobs();
+    }, [resumeId]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
-            if (!e.target.closest('.continent-dropdown')) {
-                setExpandedContinents({});
-            }
+            if (!e.target.closest('.continent-dropdown')) setExpandedContinents({});
         };
         document.addEventListener('click', handleClickOutside);
         return () => document.removeEventListener('click', handleClickOutside);
     }, []);
 
+    // Selection Handlers
     const toggleCompanySelection = (companyId, e) => {
         e.stopPropagation();
         setCompanies(prev => prev.map(c => c.id === companyId ? { ...c, selected: !c.selected } : c));
@@ -60,10 +110,20 @@ export default function JobBrowser({ onBack }) {
         setSelectedJobs(prev => ({ ...prev, [jobId]: !prev[jobId] }));
     };
 
-    const handleJobClick = (job, company) => {
+    const handleJobClick = async (job, company) => {
         setSelectedJob({ ...job, company });
         setFillingStatus('filling');
-        setTimeout(() => setFillingStatus('complete'), 2000);
+        setFormData(null);
+        try {
+            // Call actual AI generation endpoint
+            const formRes = await generateForm(job.id, resumeId);
+            setFormData(formRes);
+            setFillingStatus('complete');
+        } catch (err) {
+            console.error(err);
+            setFillingStatus('idle'); // revert on error
+            alert('Failed to auto-fill form. Please try again.');
+        }
     };
 
     const toggleJobExpand = (jobId, e) => {
@@ -107,7 +167,8 @@ export default function JobBrowser({ onBack }) {
         return 'none';
     };
 
-    const getRelevancyClasses = (r) => {
+    const getRelevancyClasses = (score) => {
+        const r = score * 100;
         if (r >= 90) return 'from-emerald-400 to-teal-500';
         if (r >= 80) return 'from-blue-400 to-cyan-500';
         if (r >= 70) return 'from-amber-400 to-orange-500';
@@ -137,7 +198,10 @@ export default function JobBrowser({ onBack }) {
                             <span className="font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-teal-400 bg-clip-text text-transparent">ApplyBot</span>
                         </button>
                         <span className="text-slate-600">|</span>
-                        <span className="text-sm text-slate-400">Job Browser</span>
+                        <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-slate-500" />
+                            <span className="text-sm text-slate-400">{resumeName || 'Resume Active'}</span>
+                        </div>
                     </div>
                     <div className="flex items-center gap-3">
                         <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-300 ${showFilters ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-slate-800/50 text-slate-400 border border-slate-700/50'}`}>
@@ -151,8 +215,8 @@ export default function JobBrowser({ onBack }) {
                             <span className="text-purple-400 font-medium">{totalJobs}</span>
                             <span className="text-slate-500">jobs</span>
                         </div>
-                        <button className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 flex items-center gap-2">
-                            Apply to Selected <ArrowRight className="w-4 h-4" />
+                        <button disabled={Object.keys(selectedJobs).length === 0} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Apply to {Object.values(selectedJobs).filter(Boolean).length} Selected <ArrowRight className="w-4 h-4" />
                         </button>
                     </div>
                 </div>
@@ -164,7 +228,7 @@ export default function JobBrowser({ onBack }) {
                     <div className="flex items-start gap-6">
                         {/* LLM Selection */}
                         <div className="flex-shrink-0 w-[220px]">
-                            <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-2"><Cpu className="w-3.5 h-3.5" /> LLM Model</label>
+                            <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-2"><Cpu className="w-3.5 h-3.5" /> Ranking Model</label>
                             <select value={selectedLLM} onChange={e => setSelectedLLM(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-700/50 text-sm text-white outline-none focus:border-indigo-500/50 appearance-none cursor-pointer">
                                 {llmOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                             </select>
@@ -214,8 +278,8 @@ export default function JobBrowser({ onBack }) {
                         </div>
                         {/* Rescore */}
                         <div className="flex-shrink-0 pt-5">
-                            <button className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300">
-                                <Sparkles className="w-4 h-4" /> Rescore
+                            <button onClick={loadJobs} disabled={loadingJobs} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50">
+                                {loadingJobs ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Rescore
                             </button>
                         </div>
                     </div>
@@ -224,6 +288,7 @@ export default function JobBrowser({ onBack }) {
 
             {/* Main Content */}
             <div className="flex flex-1 overflow-hidden">
+
                 {/* Companies Panel */}
                 <div className={`flex flex-col overflow-hidden border-r border-slate-800/50 transition-all duration-300 ${selectedJob ? 'w-[280px]' : 'w-[360px]'}`} style={{ flexShrink: 0 }}>
                     <div className="flex-shrink-0 p-4 border-b border-slate-800/50 space-y-3">
@@ -238,7 +303,20 @@ export default function JobBrowser({ onBack }) {
                         </div>
                         <p className="text-xs text-slate-500">{filteredCompanies.length} companies</p>
                     </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 relative">
+                        {loadingJobs && (
+                            <div className="absolute inset-0 z-10 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center">
+                                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                            </div>
+                        )}
+                        {error && (
+                            <div className="p-4 text-center text-red-400 text-sm">{error}</div>
+                        )}
+                        {!loadingJobs && filteredCompanies.length === 0 && !error && (
+                            <div className="p-4 text-center text-slate-500 text-sm">No companies found. (Maybe scraping is still running?)</div>
+                        )}
+
                         {filteredCompanies.map(company => (
                             <button key={company.id} onClick={() => setSelectedCompany(company)} className={`w-full text-left p-3 rounded-xl transition-all duration-300 border ${selectedCompany?.id === company.id ? 'bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border-indigo-500/30' : 'bg-slate-900/30 border-slate-800/50 hover:bg-slate-800/30'}`}>
                                 <div className="flex items-start gap-3">
@@ -253,7 +331,6 @@ export default function JobBrowser({ onBack }) {
                                         <p className="text-xs text-slate-500">{company.industry}</p>
                                         <div className="flex items-center justify-between mt-1">
                                             <span className="text-xs text-slate-400">{company.openRoles} roles</span>
-                                            {company.accountRequired && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-medium">LOGIN</span>}
                                         </div>
                                     </div>
                                 </div>
@@ -276,18 +353,19 @@ export default function JobBrowser({ onBack }) {
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                            {[...selectedCompany.jobs].sort((a, b) => b.relevancy - a.relevancy).map(job => (
+                            {/* The jobs are naturally sorted by score from the backend, but we'll sort explicitly just in case */}
+                            {[...selectedCompany.jobs].sort((a, b) => (b.score || 0) - (a.score || 0)).map(job => (
                                 <div key={job.id} className={`rounded-xl border transition-all duration-300 cursor-pointer ${selectedJob?.id === job.id ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-900/30 border-slate-800/50 hover:bg-slate-800/30'}`}>
                                     <div className="p-3" onClick={() => handleJobClick(job, selectedCompany)}>
                                         <div className="flex items-start justify-between gap-2 mb-1">
                                             <h3 className="font-semibold text-sm text-white leading-tight">{job.title}</h3>
-                                            <span className={`flex-shrink-0 px-2 py-0.5 rounded-lg text-xs font-bold bg-gradient-to-r ${getRelevancyClasses(job.relevancy)} text-white`}>{job.relevancy}%</span>
+                                            <span className={`flex-shrink-0 px-2 py-0.5 rounded-lg text-xs font-bold bg-gradient-to-r ${getRelevancyClasses(job.score)} text-white`}>{(job.score * 100).toFixed(0)}%</span>
                                         </div>
                                         <div className="flex items-center gap-1 text-xs text-slate-400 mb-1">
-                                            <MapPin className="w-3 h-3" /> {job.location}
+                                            <MapPin className="w-3 h-3" /> {job.location || 'Remote'}
                                         </div>
                                         <div className="flex items-center justify-between">
-                                            <span className="text-xs text-slate-500">{job.salary}</span>
+                                            <span className="text-xs text-slate-500">{job.type || 'Full-time'}</span>
                                             <div className="flex items-center gap-1">
                                                 <button onClick={(e) => toggleJobExpand(job.id, e)} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
                                                     {expandedJobs[job.id] ? <>Collapse <ChevronUp className="w-3 h-3" /></> : <>Expand JD <ChevronDown className="w-3 h-3" /></>}
@@ -301,11 +379,11 @@ export default function JobBrowser({ onBack }) {
                                     {expandedJobs[job.id] && (
                                         <div className="px-3 pb-3 border-t border-slate-800/50 pt-2">
                                             <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
-                                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {job.posted}</span>
-                                                <span>• {job.type}</span>
-                                                <span>• {job.department}</span>
+                                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(job.posted_date || Date.now()).toLocaleDateString()}</span>
                                             </div>
-                                            <div className="max-h-[300px] overflow-y-auto custom-scrollbar text-xs text-slate-400 whitespace-pre-line bg-slate-800/30 p-3 rounded-lg">{job.description}</div>
+                                            <div className="max-h-[300px] overflow-y-auto custom-scrollbar text-xs text-slate-400 whitespace-pre-line bg-slate-800/30 p-3 rounded-lg">
+                                                {job.description}
+                                            </div>
                                             <div className="flex items-center gap-2 mt-2">
                                                 <button onClick={() => handleJobClick(job, selectedCompany)} className="flex-1 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-all duration-300">View Application Form</button>
                                                 <button onClick={(e) => toggleJobSelection(job.id, e)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${selectedJobs[job.id] ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'}`}>{selectedJobs[job.id] ? '✓ Selected' : 'Select'}</button>
@@ -334,16 +412,14 @@ export default function JobBrowser({ onBack }) {
                             <div className="flex items-start justify-between">
                                 <div>
                                     <div className="flex items-center gap-3 mb-2">
-                                        <img src={selectedJob.company.logo} alt="" className="w-8 h-8 rounded-xl" />
+                                        <img src={selectedJob.company.logo} alt="" className="w-8 h-8 rounded-xl bg-slate-800" />
                                         <span className="font-medium text-sm">{selectedJob.company.name}</span>
-                                        <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300">{selectedJob.department}</span>
                                     </div>
                                     <h2 className="text-2xl font-bold text-white mb-2">{selectedJob.title}</h2>
                                     <div className="flex items-center gap-4 text-sm text-slate-400">
-                                        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {selectedJob.location}</span>
+                                        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {selectedJob.location || 'Remote'}</span>
                                         <span>{selectedJob.type}</span>
-                                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {selectedJob.posted}</span>
-                                        <span className="text-emerald-400">{selectedJob.salary}</span>
+                                        <span className="text-emerald-400">{selectedJob.salary || ''}</span>
                                     </div>
                                 </div>
                                 <button onClick={() => { setSelectedJob(null); setFillingStatus('idle'); }} className="p-2 rounded-lg hover:bg-slate-800 transition-all duration-300">
@@ -355,107 +431,61 @@ export default function JobBrowser({ onBack }) {
                         {/* AI Status */}
                         <div className={`flex-shrink-0 mx-6 mt-4 flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${fillingStatus === 'idle' ? 'bg-slate-800/50 border border-slate-700/50' : fillingStatus === 'filling' ? 'bg-indigo-500/10 border border-indigo-500/30' : 'bg-teal-500/10 border border-teal-500/30'}`}>
                             {fillingStatus === 'idle' && <><Bot className="w-5 h-5 text-slate-400" /><span className="text-sm text-slate-400">Ready to auto-fill application</span></>}
-                            {fillingStatus === 'filling' && <><Loader2 className="w-5 h-5 text-indigo-400 animate-spin" /><span className="text-sm text-indigo-300">AI is filling your application...</span></>}
-                            {fillingStatus === 'complete' && <><CheckCircle2 className="w-5 h-5 text-teal-400" /><span className="text-sm text-teal-300">Application auto-filled successfully</span></>}
+                            {fillingStatus === 'filling' && <><Loader2 className="w-5 h-5 text-indigo-400 animate-spin" /><span className="text-sm text-indigo-300">AI is filling your application with Groq LLM...</span></>}
+                            {fillingStatus === 'complete' && <><CheckCircle2 className="w-5 h-5 text-teal-400" /><span className="text-sm text-teal-300">Application auto-filled successfully based on your resume</span></>}
                         </div>
 
-                        {/* JD Toggle */}
-                        <div className="flex-shrink-0 mx-6 mt-3">
-                            <button onClick={() => setShowJD(!showJD)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-all duration-300">
-                                <FileText className="w-4 h-4" /> {showJD ? 'Hide' : 'Show'} full JD {showJD ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                            </button>
-                            {showJD && (
-                                <div className="mt-2 max-h-[200px] overflow-y-auto custom-scrollbar text-xs text-slate-400 whitespace-pre-line bg-slate-800/30 p-4 rounded-xl border border-slate-700/50">{selectedJob.description}</div>
-                            )}
-                        </div>
-
-                        {/* Form */}
+                        {/* Form Body - Render fields returned from Groq LLM */}
                         <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 space-y-6">
-                            {/* Personal Information */}
+
+                            {/* Personal Info */}
                             <FormSection title="Personal Information" icon={User} color="text-indigo-400" filled={fillingStatus === 'complete'}>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <FormField label="First Name" value={fillingStatus === 'complete' ? userProfile.firstName : ''} icon={User} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Last Name" value={fillingStatus === 'complete' ? userProfile.lastName : ''} icon={User} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Email" value={fillingStatus === 'complete' ? userProfile.email : ''} icon={Mail} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Phone" value={fillingStatus === 'complete' ? userProfile.phone : ''} icon={Phone} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Location" value={fillingStatus === 'complete' ? userProfile.location : ''} icon={MapPin} filled={fillingStatus === 'complete'} />
-                                    <FormField label="LinkedIn" value={fillingStatus === 'complete' ? userProfile.linkedin : ''} icon={Linkedin} filled={fillingStatus === 'complete'} />
+                                    <FormField label="First Name" value={formData?.personal_info?.first_name} icon={User} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Last Name" value={formData?.personal_info?.last_name} icon={User} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Email" value={formData?.personal_info?.email} icon={Mail} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Phone" value={formData?.personal_info?.phone} icon={Phone} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Location" value={formData?.personal_info?.location} icon={MapPin} filled={fillingStatus === 'complete'} />
+                                    <FormField label="LinkedIn" value={formData?.links?.linkedin} icon={Linkedin} filled={fillingStatus === 'complete'} />
                                 </div>
                             </FormSection>
 
-                            {/* Professional Links */}
-                            <FormSection title="Professional Links" icon={Link2} color="text-purple-400" filled={fillingStatus === 'complete'}>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <FormField label="GitHub" value={fillingStatus === 'complete' ? userProfile.github : ''} icon={Github} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Portfolio" value={fillingStatus === 'complete' ? userProfile.portfolio : ''} icon={Globe} filled={fillingStatus === 'complete'} />
-                                </div>
-                            </FormSection>
-
-                            {/* Experience */}
-                            <FormSection title="Experience" icon={Briefcase} color="text-amber-400" filled={fillingStatus === 'complete'}>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <FormField label="Current Title" value={fillingStatus === 'complete' ? userProfile.currentTitle : ''} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Company" value={fillingStatus === 'complete' ? userProfile.currentCompany : ''} icon={Building2} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Years of Experience" value={fillingStatus === 'complete' ? userProfile.yearsExperience : ''} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Salary Expectation" value={fillingStatus === 'complete' ? userProfile.salaryExpectation : ''} filled={fillingStatus === 'complete'} />
-                                </div>
-                            </FormSection>
-
-                            {/* Education */}
-                            <FormSection title="Education" icon={GraduationCap} color="text-teal-400" filled={fillingStatus === 'complete'}>
-                                <div className="space-y-3">
-                                    <FormField label="Degree" value={fillingStatus === 'complete' ? userProfile.education.degree : ''} icon={GraduationCap} filled={fillingStatus === 'complete'} />
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <FormField label="University" value={fillingStatus === 'complete' ? userProfile.education.school : ''} filled={fillingStatus === 'complete'} />
-                                        <FormField label="Graduation Year" value={fillingStatus === 'complete' ? userProfile.education.year : ''} filled={fillingStatus === 'complete'} />
-                                    </div>
-                                </div>
-                            </FormSection>
-
-                            {/* Documents */}
-                            <FormSection title="Documents" icon={FileText} color="text-rose-400" filled={fillingStatus === 'complete'}>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="p-4 rounded-xl border-2 border-dashed border-slate-700/50 text-center">
-                                        <Upload className="w-6 h-6 text-slate-500 mx-auto mb-2" />
-                                        <p className="text-xs text-slate-400">Resume</p>
-                                        {fillingStatus === 'complete' && <p className="text-xs text-teal-400 mt-1">✓ resume_john_doe.pdf</p>}
-                                    </div>
-                                    <div className={`p-4 rounded-xl border transition-all duration-300 ${fillingStatus === 'complete' ? 'border-teal-500/30 bg-teal-500/5' : 'border-dashed border-slate-700/50'} text-center`}>
-                                        <Bot className="w-6 h-6 text-slate-500 mx-auto mb-2" />
-                                        <p className="text-xs text-slate-400">Cover Letter</p>
-                                        {fillingStatus === 'complete' && <p className="text-xs text-teal-400 mt-1">✓ AI-Generated</p>}
-                                    </div>
-                                </div>
-                            </FormSection>
-
-                            {/* Professional Summary */}
-                            <FormSection title="Professional Summary" icon={Bot} color="text-indigo-400" filled={fillingStatus === 'complete'}>
+                            {/* Cover Letter */}
+                            <FormSection title="AI Cover Letter" icon={Bot} color="text-purple-400" filled={fillingStatus === 'complete'}>
                                 <div>
-                                    {fillingStatus === 'complete' && <span className="inline-block text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 mb-2">AI-Tailored</span>}
-                                    <div className={`p-4 rounded-xl border transition-all duration-300 min-h-[80px] text-sm ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-slate-300' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'}`}>
-                                        {fillingStatus === 'complete' ? userProfile.summary : '...'}
+                                    {fillingStatus === 'complete' && <span className="inline-block text-xs px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 mb-2">Generated by Groq LLM</span>}
+                                    <div className={`p-4 rounded-xl border transition-all duration-300 min-h-[120px] text-sm whitespace-pre-wrap ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-slate-300' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'}`}>
+                                        {formData?.cover_letter || '...'}
                                     </div>
                                 </div>
                             </FormSection>
 
-                            {/* Additional Questions */}
-                            <FormSection title="Additional Questions" icon={AlertCircle} color="text-amber-400" filled={fillingStatus === 'complete'}>
-                                <div className="space-y-3">
-                                    <FormField label="Work Authorization" value={fillingStatus === 'complete' ? userProfile.workAuth : ''} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Willing to Relocate" value={fillingStatus === 'complete' ? (userProfile.willingToRelocate ? 'Yes' : 'No') : ''} filled={fillingStatus === 'complete'} />
-                                    <FormField label="Preferred Locations" value={fillingStatus === 'complete' ? userProfile.preferredLocations.join(', ') : ''} icon={MapPin} filled={fillingStatus === 'complete'} />
-                                </div>
-                            </FormSection>
+                            {/* Custom Questions Answered by AI */}
+                            {formData?.custom_questions && formData.custom_questions.length > 0 && (
+                                <FormSection title="Custom Role Questions" icon={AlertCircle} color="text-amber-400" filled={fillingStatus === 'complete'}>
+                                    <div className="space-y-3">
+                                        {formData.custom_questions.map((q, i) => (
+                                            <div key={i}>
+                                                <label className="block text-xs text-slate-400 mb-1.5">{q.question}</label>
+                                                <div className={`px-4 py-3 rounded-xl border transition-all duration-300 ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-white' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'} text-sm whitespace-pre-wrap`}>
+                                                    {q.answer || '...'}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </FormSection>
+                            )}
+
                         </div>
 
                         {/* Submit */}
                         <div className="flex-shrink-0 p-6 border-t border-slate-800/50 flex items-center gap-4">
-                            <button onClick={(e) => toggleJobSelection(selectedJob.id, e)} className={`flex-1 py-3 rounded-xl font-medium transition-all duration-300 ${selectedJobs[selectedJob.id] ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg hover:shadow-indigo-500/20'}`}>
+                            <button disabled={fillingStatus !== 'complete'} onClick={(e) => toggleJobSelection(selectedJob.id, e)} className={`flex-1 py-3 rounded-xl font-medium transition-all duration-300 ${selectedJobs[selectedJob.id] ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg hover:shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
                                 {selectedJobs[selectedJob.id] ? '✓ Added to Queue' : 'Add to Apply Queue'}
                             </button>
-                            <button className="px-6 py-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-400 font-medium hover:bg-slate-700/50 transition-all duration-300">
-                                Edit Fields
-                            </button>
+                            <a href={selectedJob.apply_url} target="_blank" rel="noopener noreferrer" className="px-6 py-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-400 font-medium hover:bg-slate-700/50 transition-all duration-300 flex items-center gap-2">
+                                Apply Direct <Globe className="w-4 h-4" />
+                            </a>
                         </div>
                     </div>
                 ) : (
@@ -464,7 +494,7 @@ export default function JobBrowser({ onBack }) {
                             <Briefcase className="w-8 h-8 text-slate-600" />
                         </div>
                         <h3 className="text-lg font-semibold text-slate-400 mb-2">Select a Role</h3>
-                        <p className="text-sm text-slate-600">Click on a job listing to preview the auto-filled application form.</p>
+                        <p className="text-sm text-slate-600">Click on a job listing to preview the AI-filled application form.</p>
                     </div>
                 ))}
             </div>

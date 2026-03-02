@@ -15,9 +15,10 @@ DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 JOBS_COLLECTION = "jobs"
 RESUMES_COLLECTION = "resumes"
 
-# Embedding model (HuggingFace Inference API)
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+# Embedding model (HuggingFace Router API – new endpoint)
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
+HF_ROUTER_BASE = "https://router.huggingface.co/hf-inference/models"
 
 # Groq LLM model
 GROQ_MODEL = "llama3-8b-8192"

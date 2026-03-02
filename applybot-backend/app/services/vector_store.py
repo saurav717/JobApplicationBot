@@ -11,6 +11,19 @@ from app.config import QDRANT_URL, QDRANT_API_KEY, JOBS_COLLECTION, RESUMES_COLL
 
 _client: Optional[QdrantClient] = None
 
+# Namespace for deterministic UUIDs from arbitrary string IDs
+_UUID_NS = uuid.UUID("12345678-1234-5678-1234-567812345678")
+
+
+def _to_uuid(id_str: str) -> str:
+    """Convert any string to a deterministic UUID v5 (Qdrant-safe point ID)."""
+    try:
+        # Already a valid UUID — use it as-is
+        uuid.UUID(id_str)
+        return id_str
+    except ValueError:
+        return str(uuid.uuid5(_UUID_NS, id_str))
+
 
 def get_client() -> QdrantClient:
     global _client
@@ -42,13 +55,14 @@ def store_job(job_data: Dict[str, Any], vector: Optional[List[float]] = None) ->
     client = get_client()
     job_id = job_data.get("id") or str(uuid.uuid4())
     job_data["id"] = job_id
+    point_id = _to_uuid(job_id)
 
     if vector is None:
-        vector = [0.0] * EMBEDDING_DIM  # placeholder if no embedding provided
+        vector = [0.0] * EMBEDDING_DIM
 
     client.upsert(
         collection_name=JOBS_COLLECTION,
-        points=[PointStruct(id=job_id, vector=vector, payload=job_data)]
+        points=[PointStruct(id=point_id, vector=vector, payload=job_data)]
     )
     return job_id
 
@@ -61,7 +75,8 @@ def store_jobs_batch(jobs: List[Dict[str, Any]], vectors: Optional[List[List[flo
         job_id = job.get("id") or str(uuid.uuid4())
         job["id"] = job_id
         vec = vectors[i] if vectors and i < len(vectors) else [0.0] * EMBEDDING_DIM
-        points.append(PointStruct(id=job_id, vector=vec, payload=job))
+        point_id = _to_uuid(job_id)
+        points.append(PointStruct(id=point_id, vector=vec, payload=job))
 
     client.upsert(collection_name=JOBS_COLLECTION, points=points)
     return len(points)
@@ -69,7 +84,11 @@ def store_jobs_batch(jobs: List[Dict[str, Any]], vectors: Optional[List[List[flo
 
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     client = get_client()
-    results = client.retrieve(collection_name=JOBS_COLLECTION, ids=[job_id], with_payload=True)
+    point_id = _to_uuid(job_id)
+    try:
+        results = client.retrieve(collection_name=JOBS_COLLECTION, ids=[point_id], with_payload=True)
+    except Exception:
+        return None
     if results:
         return results[0].payload
     return None
@@ -88,7 +107,8 @@ def get_all_jobs(limit: int = 100) -> List[Dict[str, Any]]:
 
 def delete_job(job_id: str):
     client = get_client()
-    client.delete(collection_name=JOBS_COLLECTION, points_selector=[job_id])
+    point_id = _to_uuid(job_id)
+    client.delete(collection_name=JOBS_COLLECTION, points_selector=[point_id])
 
 
 def search_jobs_by_vector(
@@ -127,16 +147,21 @@ def store_resume(resume_id: str, resume_data: Dict[str, Any], vector: Optional[L
     client = get_client()
     if vector is None:
         vector = [0.0] * EMBEDDING_DIM
-
+    point_id = _to_uuid(resume_id)
+    resume_data["_original_id"] = resume_id
     client.upsert(
         collection_name=RESUMES_COLLECTION,
-        points=[PointStruct(id=resume_id, vector=vector, payload=resume_data)]
+        points=[PointStruct(id=point_id, vector=vector, payload=resume_data)]
     )
 
 
 def get_resume(resume_id: str) -> Optional[Dict[str, Any]]:
     client = get_client()
-    results = client.retrieve(collection_name=RESUMES_COLLECTION, ids=[resume_id], with_payload=True)
+    point_id = _to_uuid(resume_id)
+    try:
+        results = client.retrieve(collection_name=RESUMES_COLLECTION, ids=[point_id], with_payload=True)
+    except Exception:
+        return None
     if results:
         return results[0].payload
     return None
@@ -144,7 +169,11 @@ def get_resume(resume_id: str) -> Optional[Dict[str, Any]]:
 
 def get_resume_vector(resume_id: str) -> Optional[List[float]]:
     client = get_client()
-    results = client.retrieve(collection_name=RESUMES_COLLECTION, ids=[resume_id], with_vectors=True)
+    point_id = _to_uuid(resume_id)
+    try:
+        results = client.retrieve(collection_name=RESUMES_COLLECTION, ids=[point_id], with_vectors=True)
+    except Exception:
+        return None
     if results and results[0].vector:
         return results[0].vector
     return None

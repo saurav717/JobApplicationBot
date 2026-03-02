@@ -4,10 +4,26 @@ import JobBrowser from './JobBrowser';
 
 export default function App() {
     const [currentView, setCurrentView] = useState('landing');
+    // resumeContext: { resumeId, resumeName, llm }
+    const [resumeContext, setResumeContext] = useState(null);
 
-    if (currentView === 'browser') {
-        return <JobBrowser onBack={() => setCurrentView('landing')} />;
+    if (currentView === 'browser' && resumeContext) {
+        return (
+            <JobBrowser
+                resumeId={resumeContext.resumeId}
+                resumeName={resumeContext.resumeName}
+                selectedLLM={resumeContext.llm}
+                onBack={() => { setCurrentView('landing'); setResumeContext(null); }}
+            />
+        );
     }
 
-    return <LandingPage onStart={() => setCurrentView('browser')} />;
+    return (
+        <LandingPage
+            onStart={(ctx) => {
+                setResumeContext(ctx);
+                setCurrentView('browser');
+            }}
+        />
+    );
 }

@@ -2,8 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.routers import resumes, jobs, applications
+from app.routers import resumes, jobs, applications, scraper
 from app.services.vector_store import init_collections
+from app.services.scheduler import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
@@ -14,7 +15,13 @@ async def lifespan(app: FastAPI):
         print("✅ Qdrant collections initialized")
     except Exception as e:
         print(f"⚠️  Qdrant init warning: {e}")
+
+    # Start the hourly job scraper background task
+    start_scheduler()
+
     yield
+
+    stop_scheduler()
     print("👋 Shutting down ApplyBot...")
 
 
@@ -36,6 +43,7 @@ app.add_middleware(
 app.include_router(resumes.router, prefix="/api/resumes", tags=["Resumes"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
+app.include_router(scraper.router, prefix="/api/scraper", tags=["Scraper"])
 
 
 @app.get("/", tags=["Health"])
