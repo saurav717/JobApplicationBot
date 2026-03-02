@@ -1,12 +1,13 @@
-import fitz  # PyMuPDF
 import re
+import fitz  # PyMuPDF
 from typing import Dict, Any
 
 
 def parse_resume_pdf(file_bytes: bytes) -> Dict[str, Any]:
     """
-    Parse a PDF resume and extract structured data.
-    Returns a dict with name, email, phone, skills, experience, education, raw_text.
+    Parse a PDF resume and extract structured data using a Groq LLM.
+    Falls back to regex heuristics if the LLM call fails.
+    Returns a dict with name, email, phone, location, summary, skills, experience, education, raw_text.
     """
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     raw_text = ""
@@ -14,6 +15,19 @@ def parse_resume_pdf(file_bytes: bytes) -> Dict[str, Any]:
         raw_text += page.get_text()
     doc.close()
 
+    try:
+        from app.services.llm import parse_resume_with_llm
+        parsed = parse_resume_with_llm(raw_text)
+        parsed["raw_text"] = raw_text
+        return parsed
+    except Exception as e:
+        print(f"[Resume parser] LLM extraction failed ({e}), falling back to regex")
+        return _regex_fallback(raw_text)
+
+
+# ─── Regex fallback ────────────────────────────────────────────────────────────
+
+def _regex_fallback(raw_text: str) -> Dict[str, Any]:
     return {
         "raw_text": raw_text,
         "name": _extract_name(raw_text),
@@ -40,7 +54,6 @@ def _extract_phone(text: str) -> str:
 
 
 def _extract_name(text: str) -> str:
-    """Heuristic: first non-empty line that looks like a name."""
     for line in text.strip().splitlines():
         line = line.strip()
         if line and len(line.split()) in (2, 3) and line.replace(" ", "").isalpha():
@@ -50,8 +63,8 @@ def _extract_name(text: str) -> str:
 
 def _extract_location(text: str) -> str:
     patterns = [
-        r'([A-Z][a-z]+,\s*[A-Z]{2})',          # City, ST
-        r'([A-Z][a-z]+,\s*[A-Z][a-z]+)',        # City, Country
+        r'([A-Z][a-z]+,\s*[A-Z]{2})',
+        r'([A-Z][a-z]+,\s*[A-Z][a-z]+)',
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -61,7 +74,6 @@ def _extract_location(text: str) -> str:
 
 
 def _extract_summary(text: str) -> str:
-    """Extract first paragraph after a Summary/Profile/About section header."""
     pattern = re.search(
         r'(?:summary|profile|about|objective)[:\s\n]+(.+?)(?:\n\n|\n[A-Z])',
         text, re.IGNORECASE | re.DOTALL
@@ -92,7 +104,6 @@ def _extract_skills(text: str) -> list:
 
 
 def _extract_experience(text: str) -> list:
-    """Very simplified extraction — returns raw experience block lines."""
     section = _extract_section(text, ["experience", "work history", "employment"])
     if not section:
         return []
@@ -108,7 +119,7 @@ def _extract_experience(text: str) -> list:
             current.append(line)
     if current:
         entries.append({"raw": " ".join(current)})
-    return entries[:5]  # cap at 5
+    return entries[:5]
 
 
 def _extract_education(text: str) -> list:

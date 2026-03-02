@@ -1,7 +1,7 @@
 import json
 from typing import List, Dict, Any, Optional
 from groq import Groq
-from app.config import GROQ_API_KEY, GROQ_MODEL
+from app.config import GROQ_API_KEY, GROQ_MODEL, GROQ_PARSE_MODEL
 
 
 _client = None
@@ -78,6 +78,58 @@ Include ALL {len(job_summaries)} jobs. Sort by score descending."""
             result.append(enriched)
 
     return result[:limit]
+
+
+def parse_resume_with_llm(raw_text: str) -> Dict[str, Any]:
+    """
+    Use Groq LLM to extract structured fields from raw resume text.
+    Returns a dict with name, email, phone, location, summary, skills, experience, education.
+    """
+    client = get_client()
+
+    prompt = f"""You are an expert resume parser. Extract structured information from the resume text below.
+
+RESUME TEXT:
+{raw_text[:4000]}
+
+Respond ONLY with a JSON object with exactly these fields:
+{{
+  "name": "full name of the candidate",
+  "email": "email address",
+  "phone": "phone number",
+  "location": "city, state or country",
+  "summary": "professional summary or objective in 2-4 sentences",
+  "skills": ["skill1", "skill2"],
+  "experience": [
+    {{"raw": "Job Title at Company (dates) — key responsibilities/achievements"}},
+    {{"raw": "..."}}
+  ],
+  "education": [
+    {{"raw": "Degree, Institution, Year"}},
+    {{"raw": "..."}}
+  ]
+}}
+
+Rules:
+- Use empty string "" for any missing text field
+- Use empty array [] for any missing list field
+- Extract ALL technical and soft skills explicitly mentioned
+- Include up to 5 most recent experience entries
+- Include up to 4 education entries
+- Do NOT invent or infer anything not present in the resume text"""
+
+    response = client.chat.completions.create(
+        model=GROQ_PARSE_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=2000,
+    )
+    content = response.choices[0].message.content.strip()
+    start = content.find("{")
+    end = content.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError("No JSON object found in LLM response")
+    return json.loads(content[start:end])
 
 
 async def generate_form_values(

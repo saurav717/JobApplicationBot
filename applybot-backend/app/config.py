@@ -20,5 +20,6 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 HF_ROUTER_BASE = "https://router.huggingface.co/hf-inference/models"
 
-# Groq LLM model
-GROQ_MODEL = "llama3-8b-8192"
+# Groq LLM models
+GROQ_MODEL = "llama3-8b-8192"           # reranking & form filling
+GROQ_PARSE_MODEL = "llama-3.3-70b-versatile"  # resume parsing (higher accuracy)
