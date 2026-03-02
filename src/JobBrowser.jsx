@@ -7,11 +7,12 @@ import {
     SlidersHorizontal, Briefcase, RefreshCw, GraduationCap, DollarSign,
     Shield, RotateCcw
 } from 'lucide-react';
-import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, triggerMultiPlatformScrape, getUserScrapeStatus, getStoredToken, getStoredUser } from './api';
+import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, triggerMultiPlatformScrape, getUserScrapeStatus, getStoredToken, getStoredUser, scrapeTopCompanies } from './api';
 import SourceBadge from './components/Jobs/SourceBadge';
 import ScrapeProgressBar from './components/Jobs/ScrapeProgressBar';
 import PlatformFilter from './components/Jobs/PlatformFilter';
 import EmbeddedApplicationForm from './components/Jobs/EmbeddedApplicationForm';
+import ApplyQueue from './components/Jobs/ApplyQueue';
 import { continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
@@ -58,6 +59,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     // Scraper status
     const [scraperStatus, setScraperStatus] = useState(null); // { last_run, jobs_scraped }
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isScrapingTopCompanies, setIsScrapingTopCompanies] = useState(false);
 
     // Platform filter state
     const [selectedPlatforms, setSelectedPlatforms] = useState([]);
@@ -124,6 +126,22 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
         }
         await loadJobs();
         setIsRefreshing(false);
+    };
+
+    // Scrape top 50+ companies via their public Workday portals
+    const handleScrapeTopCompanies = async () => {
+        if (isScrapingTopCompanies) return;
+        setIsScrapingTopCompanies(true);
+        try {
+            await scrapeTopCompanies();
+            // Wait for background scrape to make progress, then reload
+            await new Promise(r => setTimeout(r, 5000));
+            await loadJobs();
+        } catch (err) {
+            console.error('Failed to scrape top companies:', err);
+        } finally {
+            setIsScrapingTopCompanies(false);
+        }
     };
 
     // Initial Load & Rescore
@@ -385,16 +403,28 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                         </div>
                         {/* Refresh jobs */}
                         <div className="flex-shrink-0 pt-5 space-y-1">
-                            <button
-                                onClick={refreshJobs}
-                                disabled={isRefreshing || loadingJobs}
-                                className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50"
-                            >
-                                {isRefreshing
-                                    ? <><RotateCcw className="w-4 h-4 animate-spin" /> Fetching…</>
-                                    : <><RefreshCw className="w-4 h-4" /> Refresh Jobs</>
-                                }
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={refreshJobs}
+                                    disabled={isRefreshing || loadingJobs}
+                                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50"
+                                >
+                                    {isRefreshing
+                                        ? <><RotateCcw className="w-4 h-4 animate-spin" /> Fetching…</>
+                                        : <><RefreshCw className="w-4 h-4" /> Refresh Jobs</>
+                                    }
+                                </button>
+                                <button
+                                    onClick={handleScrapeTopCompanies}
+                                    disabled={isScrapingTopCompanies || isRefreshing}
+                                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-amber-500/20 transition-all duration-300 disabled:opacity-50"
+                                >
+                                    {isScrapingTopCompanies
+                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Scraping 50+ Companies…</>
+                                        : <><Building2 className="w-4 h-4" /> Scrape Top Companies</>
+                                    }
+                                </button>
+                            </div>
                             {scraperStatus?.last_run && scraperStatus.last_run !== 'Never' && (
                                 <p className="text-xs text-slate-500">
                                     Updated {new Date(scraperStatus.last_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -734,6 +764,17 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                     </div>
                 ))}
             </div>
+
+            <ApplyQueue
+                selectedJobs={selectedJobs}
+                companies={companies}
+                onRemoveJob={(job) => {
+                    const key = jobKey(job);
+                    setSelectedJobs(prev => ({ ...prev, [key]: false }));
+                }}
+                onClearQueue={() => setSelectedJobs({})}
+                jobKeyFn={jobKey}
+            />
         </div>
     );
 }

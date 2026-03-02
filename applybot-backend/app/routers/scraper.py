@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from app.routers.auth import get_current_user
 from app.services.job_scraper import run_scrape, run_resume_targeted_scrape, get_status
+from app.services.scrapers.workday_scraper import WorkdayDiscovery
 
 router = APIRouter()
 
@@ -178,6 +179,130 @@ async def test_platform_connection(platform: str, credentials: Dict):
         workday_url=credentials.get("workday_url"),
     )
     return result
+
+
+# ── Top Companies (public Workday scraping) ────────────────────────────────
+
+@router.get("/top-companies")
+async def list_top_companies():
+    """
+    List all known top tech companies that we can scrape jobs from.
+    No authentication required - these are public job listings.
+    """
+    companies = [
+        {
+            "company": t["company"],
+            "url": f"https://{t['url']}",
+            "ats": "workday",
+        }
+        for t in WorkdayDiscovery.KNOWN_TENANTS
+    ]
+    return {"companies": companies, "count": len(companies)}
+
+
+@router.post("/scrape-top-companies")
+async def scrape_top_companies(
+    keywords: List[str] = Body(default=["software engineer", "data scientist"]),
+    limit_per_company: int = Body(default=10, ge=1, le=50),
+    companies: Optional[List[str]] = Body(default=None),
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Scrape jobs from 50+ top tech companies using their public Workday portals.
+    No authentication required - these are public job listings.
+
+    Args:
+        keywords: Search terms (default: software engineer, data scientist)
+        limit_per_company: Max jobs per company (default: 10)
+        companies: Optional filter to specific company names
+    """
+    tenants = WorkdayDiscovery.KNOWN_TENANTS
+    if companies:
+        filter_lower = {c.lower() for c in companies}
+        tenants = [t for t in tenants if t["company"].lower() in filter_lower]
+
+    target_count = len(tenants)
+
+    if background_tasks:
+        background_tasks.add_task(
+            _scrape_top_companies_task,
+            keywords,
+            limit_per_company,
+            companies,
+        )
+        return {
+            "message": f"Scraping {target_count} companies in background",
+            "companies": [t["company"] for t in tenants],
+        }
+    else:
+        jobs = await _scrape_top_companies_sync(keywords, limit_per_company, companies)
+        return {"jobs": jobs, "count": len(jobs)}
+
+
+async def _scrape_top_companies_sync(
+    keywords: List[str],
+    limit_per_company: int,
+    company_filter: Optional[List[str]],
+) -> List[Dict[str, Any]]:
+    """Run Workday scrape synchronously and return plain dicts."""
+    scraped = await WorkdayDiscovery.scrape_all_known_companies(
+        keywords=keywords,
+        limit_per_company=limit_per_company,
+        max_companies=len(WorkdayDiscovery.KNOWN_TENANTS),
+    )
+    return [_scraped_to_dict(j) for j in scraped]
+
+
+async def _scrape_top_companies_task(
+    keywords: List[str],
+    limit_per_company: int,
+    company_filter: Optional[List[str]],
+) -> None:
+    """Background task: scrape top Workday companies and store results."""
+    from app.services.embeddings import embed_text
+    from app.services.vector_store import store_jobs_batch, get_all_jobs
+
+    scraped = await WorkdayDiscovery.scrape_all_known_companies(
+        keywords=keywords,
+        limit_per_company=limit_per_company,
+        max_companies=len(WorkdayDiscovery.KNOWN_TENANTS),
+    )
+    jobs = [_scraped_to_dict(j) for j in scraped]
+
+    if not jobs:
+        return
+
+    existing = get_all_jobs(limit=5000)
+    existing_keys = {
+        (j.get("title", "").lower().strip(), j.get("company", "").lower().strip())
+        for j in existing
+    }
+    new_jobs = [
+        j for j in jobs
+        if (j["title"].lower().strip(), j["company"].lower().strip()) not in existing_keys
+    ]
+
+    if not new_jobs:
+        return
+
+    batch_size = 10
+    for i in range(0, len(new_jobs), batch_size):
+        batch = new_jobs[i:i + batch_size]
+        texts = [
+            f"{j['title']} {j['company']} {j.get('description', '')[:300]}"
+            for j in batch
+        ]
+        embeddings = await asyncio.gather(
+            *[embed_text(t) for t in texts],
+            return_exceptions=True,
+        )
+        valid_batch, vectors = [], []
+        for job, vec in zip(batch, embeddings):
+            if isinstance(vec, list) and len(vec) > 0:
+                valid_batch.append(job)
+                vectors.append(vec)
+        if valid_batch:
+            store_jobs_batch(valid_batch, vectors)
 
 
 # ── Background task ────────────────────────────────────────────────────────

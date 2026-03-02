@@ -6,6 +6,8 @@ from typing import List, Dict, Any
 from app.models.schemas import JobCreate
 from app.services.vector_store import store_jobs_batch, get_all_jobs
 from app.services.embeddings import embed_text
+from app.services.scrapers.lever_scraper import LeverScraper
+from app.services.scrapers.greenhouse_scraper import GreenhouseScraper
 
 # ── Track scraper state ────────────────────────────────────────────────────
 _last_run: str = "Never"
@@ -236,6 +238,72 @@ async def fetch_findwork(search: str = "") -> List[Dict[str, Any]]:
         return []
 
 
+# ── Lever & Greenhouse public scrapers ─────────────────────────────────────
+
+# Known companies using Lever (public JSON API, no auth required)
+_LEVER_COMPANIES = [
+    "netflix", "figma", "notion", "linear", "vercel", "supabase",
+    "planetscale", "railway", "render", "deno", "prisma", "hasura",
+]
+
+# Known companies using Greenhouse (public JSON API, no auth required)
+_GREENHOUSE_COMPANIES = [
+    "airbnb", "doordash", "instacart", "lyft", "pinterest",
+    "snap", "reddit", "discord", "twitch", "roblox",
+    "flexport", "brex", "ramp", "mercury", "deel",
+]
+
+
+async def fetch_lever_jobs() -> List[Dict[str, Any]]:
+    """Fetch jobs from known Lever companies (no auth required)."""
+    all_jobs: List[Dict[str, Any]] = []
+    for slug in _LEVER_COMPANIES[:10]:
+        try:
+            scraper = LeverScraper(company_slug=slug)
+            scraped = await scraper.search_jobs(keywords=[], limit=10)
+            for job in scraped:
+                all_jobs.append({
+                    "title": job.title,
+                    "company": job.company,
+                    "location": job.location,
+                    "type": job.job_type,
+                    "description": job.description,
+                    "apply_url": job.application_url,
+                    "posted": job.posted_date,
+                    "source_platform": "lever",
+                    "ats_type": "lever",
+                    "logo_url": f"https://logo.clearbit.com/{slug}.com",
+                })
+        except Exception as e:
+            print(f"[Lever/{slug}] Error: {e}")
+    return all_jobs
+
+
+async def fetch_greenhouse_jobs() -> List[Dict[str, Any]]:
+    """Fetch jobs from known Greenhouse companies (no auth required)."""
+    all_jobs: List[Dict[str, Any]] = []
+    for slug in _GREENHOUSE_COMPANIES[:10]:
+        try:
+            scraper = GreenhouseScraper(company_slug=slug)
+            scraped = await scraper.search_jobs(keywords=[], limit=10)
+            for job in scraped:
+                all_jobs.append({
+                    "title": job.title,
+                    "company": job.company,
+                    "location": job.location,
+                    "type": job.job_type,
+                    "description": job.description,
+                    "apply_url": job.application_url,
+                    "posted": job.posted_date,
+                    "source_platform": "greenhouse",
+                    "ats_type": "greenhouse",
+                    "logo_url": f"https://logo.clearbit.com/{slug}.com",
+                })
+        except Exception as e:
+            print(f"[Greenhouse/{slug}] Error: {e}")
+    return all_jobs
+
+
 # ── Deduplication ──────────────────────────────────────────────────────────
 
 def _deduplicate(new_jobs: List[Dict], existing_jobs: List[Dict]) -> List[Dict]:
@@ -273,6 +341,8 @@ async def run_resume_targeted_scrape(search_profile: Dict[str, Any]) -> int:
         fetch_jobicy(),
         fetch_himalayas(),
         fetch_findwork(search=keywords),
+        fetch_lever_jobs(),
+        fetch_greenhouse_jobs(),
         return_exceptions=True,
     )
 
@@ -351,6 +421,8 @@ async def run_scrape() -> int:
         fetch_jobicy(),
         fetch_himalayas(),
         fetch_findwork(),
+        fetch_lever_jobs(),
+        fetch_greenhouse_jobs(),
         return_exceptions=True,
     )
 
