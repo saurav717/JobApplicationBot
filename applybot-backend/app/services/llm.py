@@ -245,23 +245,44 @@ async def generate_form_values(
     """
     client = get_client()
 
-    prompt = f"""You are an AI job application assistant. Fill in application form fields based on:
+    experience_text = "\n".join(
+        exp.get("raw", "") for exp in resume.get("experience", [])[:3]
+    )
+    education_text = "\n".join(
+        edu.get("raw", "") for edu in resume.get("education", [])[:2]
+    )
+
+    prompt = f"""You are an AI job application assistant. Fill in every application form field from the candidate's resume.
 
 JOB:
 Title: {job.get('title')}
 Company: {job.get('company')}
-Description: {str(job.get('description', ''))[:500]}
+Description: {str(job.get('description', ''))[:600]}
 Required Skills: {', '.join(job.get('skills_required', []))}
 
-CANDIDATE RESUME DATA:
-Name: {resume.get('name', 'John Doe')}
+CANDIDATE RESUME:
+Name: {resume.get('name', '')}
 Email: {resume.get('email', '')}
 Phone: {resume.get('phone', '')}
 Location: {resume.get('location', '')}
 Skills: {', '.join(resume.get('skills', []))}
-Summary: {str(resume.get('summary', ''))[:300]}
+Summary: {str(resume.get('summary', ''))[:400]}
+
+Experience:
+{experience_text}
+
+Education:
+{education_text}
 
 {f"Custom instructions: {custom_instructions}" if custom_instructions else ""}
+
+Rules:
+- Fill every field accurately from the resume. Do NOT invent data not in the resume.
+- For current_title and current_company: use the most recent experience entry.
+- For years_experience: estimate from the experience dates (return as a number string like "5").
+- For salary_expectation: estimate based on role seniority (e.g. "$130,000 - $160,000").
+- Write the cover_letter in 3 paragraphs: (1) why excited about this company, (2) specific relevant experience, (3) closing.
+- Write the summary as a 2-3 sentence tailored pitch for THIS specific role.
 
 Respond ONLY with JSON:
 {{
@@ -282,8 +303,8 @@ Respond ONLY with JSON:
   "graduation_year": "",
   "work_auth": "US Citizen",
   "willing_to_relocate": true,
-  "summary": "A 2-3 sentence tailored professional summary for this specific job",
-  "cover_letter": "A short 3-paragraph cover letter tailored to this job"
+  "summary": "2-3 sentence tailored professional summary for this specific job",
+  "cover_letter": "3-paragraph cover letter tailored to this role and company"
 }}"""
 
     try:

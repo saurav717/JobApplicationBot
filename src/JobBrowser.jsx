@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import {
     ChevronDown, ChevronUp, Check, X, Sparkles,
     ArrowRight, Building2, MapPin, Clock, TrendingUp, Filter, Search,
-    User, Mail, Phone, FileText, Linkedin,
+    User, Mail, Phone, FileText, Linkedin, Github, Link2,
     Bot, CheckCircle2, AlertCircle, Loader2, Globe, Calendar, Cpu,
-    SlidersHorizontal, Briefcase, RefreshCw
+    SlidersHorizontal, Briefcase, RefreshCw, GraduationCap, DollarSign,
+    Shield, RotateCcw
 } from 'lucide-react';
-import { searchJobsGrouped, generateForm } from './api';
+import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus } from './api';
 import { continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
@@ -49,6 +50,30 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     const [fillingStatus, setFillingStatus] = useState('idle'); // idle | filling | complete
     const [formData, setFormData] = useState(null);
 
+    // Scraper status
+    const [scraperStatus, setScraperStatus] = useState(null); // { last_run, jobs_scraped }
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    // Refresh: trigger targeted scrape then reload jobs
+    const refreshJobs = async () => {
+        if (isRefreshing || loadingJobs) return;
+        setIsRefreshing(true);
+        try {
+            await triggerResumeTargetedScrape(resumeId);
+        } catch (e) {
+            console.warn('Scrape trigger failed:', e);
+        }
+        // Give the background scrape a moment to start, then re-search
+        await new Promise(r => setTimeout(r, 3000));
+        await loadJobs();
+        // Refresh status after reload
+        try {
+            const s = await getScraperStatus();
+            setScraperStatus(s);
+        } catch (_) {}
+        setIsRefreshing(false);
+    };
+
     // Initial Load & Rescore
     const loadJobs = async () => {
         if (!resumeId) return;
@@ -90,9 +115,10 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
         }
     };
 
-    // Load jobs when resumeId changes
+    // Load jobs and scraper status on mount
     useEffect(() => {
         loadJobs();
+        getScraperStatus().then(setScraperStatus).catch(() => {});
     }, [resumeId]);
 
     useEffect(() => {
@@ -280,11 +306,23 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                 })}
                             </div>
                         </div>
-                        {/* Rescore */}
-                        <div className="flex-shrink-0 pt-5">
-                            <button onClick={loadJobs} disabled={loadingJobs} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50">
-                                {loadingJobs ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Rescore
+                        {/* Refresh jobs */}
+                        <div className="flex-shrink-0 pt-5 space-y-1">
+                            <button
+                                onClick={refreshJobs}
+                                disabled={isRefreshing || loadingJobs}
+                                className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50"
+                            >
+                                {isRefreshing
+                                    ? <><RotateCcw className="w-4 h-4 animate-spin" /> Fetching…</>
+                                    : <><RefreshCw className="w-4 h-4" /> Refresh Jobs</>
+                                }
                             </button>
+                            {scraperStatus?.last_run && scraperStatus.last_run !== 'Never' && (
+                                <p className="text-xs text-slate-500">
+                                    Updated {new Date(scraperStatus.last_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -474,10 +512,10 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                             {fillingStatus === 'complete' && <><CheckCircle2 className="w-5 h-5 text-teal-400" /><span className="text-sm text-teal-300">Application auto-filled successfully based on your resume</span></>}
                         </div>
 
-                        {/* Form Body - Render fields returned from Groq LLM */}
-                        <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 space-y-6">
+                        {/* Form Body - All sections returned from Groq LLM */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 space-y-5">
 
-                            {/* Personal Info */}
+                            {/* 1. Personal Info */}
                             <FormSection title="Personal Information" icon={User} color="text-indigo-400" filled={fillingStatus === 'complete'}>
                                 <div className="grid grid-cols-2 gap-3">
                                     <FormField label="First Name" value={formData?.personal_info?.first_name} icon={User} filled={fillingStatus === 'complete'} />
@@ -485,35 +523,66 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                     <FormField label="Email" value={formData?.personal_info?.email} icon={Mail} filled={fillingStatus === 'complete'} />
                                     <FormField label="Phone" value={formData?.personal_info?.phone} icon={Phone} filled={fillingStatus === 'complete'} />
                                     <FormField label="Location" value={formData?.personal_info?.location} icon={MapPin} filled={fillingStatus === 'complete'} />
-                                    <FormField label="LinkedIn" value={formData?.links?.linkedin} icon={Linkedin} filled={fillingStatus === 'complete'} />
+                                    <FormField label="LinkedIn" value={formData?.personal_info?.linkedin} icon={Linkedin} filled={fillingStatus === 'complete'} />
                                 </div>
                             </FormSection>
 
-                            {/* Cover Letter */}
-                            <FormSection title="AI Cover Letter" icon={Bot} color="text-purple-400" filled={fillingStatus === 'complete'}>
-                                <div>
-                                    {fillingStatus === 'complete' && <span className="inline-block text-xs px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 mb-2">Generated by Groq LLM</span>}
-                                    <div className={`p-4 rounded-xl border transition-all duration-300 min-h-[120px] text-sm whitespace-pre-wrap ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-slate-300' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'}`}>
-                                        {formData?.cover_letter || '...'}
-                                    </div>
+                            {/* 2. Professional Links */}
+                            <FormSection title="Professional Links" icon={Link2} color="text-cyan-400" filled={fillingStatus === 'complete'}>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <FormField label="GitHub" value={formData?.professional_links?.github} icon={Github} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Portfolio" value={formData?.professional_links?.portfolio} icon={Globe} filled={fillingStatus === 'complete'} />
                                 </div>
                             </FormSection>
 
-                            {/* Custom Questions Answered by AI */}
-                            {formData?.custom_questions && formData.custom_questions.length > 0 && (
-                                <FormSection title="Custom Role Questions" icon={AlertCircle} color="text-amber-400" filled={fillingStatus === 'complete'}>
-                                    <div className="space-y-3">
-                                        {formData.custom_questions.map((q, i) => (
-                                            <div key={i}>
-                                                <label className="block text-xs text-slate-400 mb-1.5">{q.question}</label>
-                                                <div className={`px-4 py-3 rounded-xl border transition-all duration-300 ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-white' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'} text-sm whitespace-pre-wrap`}>
-                                                    {q.answer || '...'}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </FormSection>
-                            )}
+                            {/* 3. Experience */}
+                            <FormSection title="Professional Experience" icon={Briefcase} color="text-purple-400" filled={fillingStatus === 'complete'}>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <FormField label="Current / Last Title" value={formData?.experience?.current_title} icon={Briefcase} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Current / Last Company" value={formData?.experience?.current_company} icon={Building2} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Years of Experience" value={formData?.experience?.years_experience} icon={Clock} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Salary Expectation" value={formData?.experience?.salary_expectation} icon={DollarSign} filled={fillingStatus === 'complete'} />
+                                </div>
+                            </FormSection>
+
+                            {/* 4. Education */}
+                            <FormSection title="Education" icon={GraduationCap} color="text-amber-400" filled={fillingStatus === 'complete'}>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <FormField label="Degree" value={formData?.education?.degree} icon={GraduationCap} filled={fillingStatus === 'complete'} className="col-span-2" />
+                                    <FormField label="University" value={formData?.education?.university} icon={Building2} filled={fillingStatus === 'complete'} />
+                                    <FormField label="Graduation Year" value={formData?.education?.graduation_year} icon={Calendar} filled={fillingStatus === 'complete'} />
+                                </div>
+                            </FormSection>
+
+                            {/* 5. Work Auth & Relocation */}
+                            <FormSection title="Work Authorization" icon={Shield} color="text-emerald-400" filled={fillingStatus === 'complete'}>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <FormField label="Work Authorization" value={formData?.work_auth} icon={Shield} filled={fillingStatus === 'complete'} />
+                                    <FormField
+                                        label="Willing to Relocate"
+                                        value={formData?.willing_to_relocate === true ? 'Yes' : formData?.willing_to_relocate === false ? 'No' : undefined}
+                                        icon={MapPin}
+                                        filled={fillingStatus === 'complete'}
+                                    />
+                                </div>
+                            </FormSection>
+
+                            {/* 6. Professional Summary */}
+                            <FormSection title="Professional Summary" icon={FileText} color="text-teal-400" filled={fillingStatus === 'complete'}>
+                                <div className={`p-4 rounded-xl border transition-all duration-300 min-h-[80px] text-sm whitespace-pre-wrap ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-slate-300' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'}`}>
+                                    {formData?.summary || '...'}
+                                </div>
+                            </FormSection>
+
+                            {/* 7. AI Cover Letter */}
+                            <FormSection title="AI Cover Letter" icon={Bot} color="text-indigo-400" filled={fillingStatus === 'complete'}>
+                                {fillingStatus === 'complete' && (
+                                    <span className="inline-block text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 mb-2">Generated by Groq · Llama 3 8B</span>
+                                )}
+                                <div className={`p-4 rounded-xl border transition-all duration-300 min-h-[120px] text-sm whitespace-pre-wrap ${fillingStatus === 'complete' ? 'bg-teal-500/5 border-teal-500/30 text-slate-300' : 'bg-slate-800/30 border-slate-700/50 text-slate-600'}`}>
+                                    {formData?.cover_letter || '...'}
+                                </div>
+                            </FormSection>
 
                         </div>
 
