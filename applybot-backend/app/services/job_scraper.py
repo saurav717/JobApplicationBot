@@ -45,15 +45,19 @@ async def fetch_arbeitnow() -> List[Dict[str, Any]]:
         return []
 
 
-async def fetch_remotive() -> List[Dict[str, Any]]:
-    """Fetch remote jobs from Remotive (free, no API key needed)."""
+async def fetch_remotive(search: str = "") -> List[Dict[str, Any]]:
+    """Fetch remote jobs from Remotive (free, no API key needed).
+    Optionally filter by keyword search query.
+    """
     categories = ["software-dev", "data", "devops-sysadmin"]
     all_jobs = []
     async with httpx.AsyncClient(timeout=15.0) as client:
         for cat in categories:
             try:
-                url = f"https://remotive.com/api/remote-jobs?category={cat}&limit=20"
-                r = await client.get(url)
+                params = {"category": cat, "limit": 20}
+                if search:
+                    params["search"] = search
+                r = await client.get("https://remotive.com/api/remote-jobs", params=params)
                 r.raise_for_status()
                 data = r.json()
                 for item in data.get("jobs", []):
@@ -97,7 +101,77 @@ def _deduplicate(new_jobs: List[Dict], existing_jobs: List[Dict]) -> List[Dict]:
     return unique
 
 
-# ── Main scrape orchestrator ───────────────────────────────────────────────
+# ── Main scrape orchestrators ──────────────────────────────────────────────
+
+async def run_resume_targeted_scrape(search_profile: Dict[str, Any]) -> int:
+    """
+    Targeted job scrape driven by a resume's job search profile.
+    Uses the profile's keywords and target titles to fetch more relevant jobs.
+    Returns count of new jobs stored.
+    """
+    keywords = " ".join(search_profile.get("search_keywords", [])[:5])
+    print(f"[Scraper] Targeted scrape for: '{keywords}'")
+
+    results = await asyncio.gather(
+        fetch_arbeitnow(),
+        fetch_remotive(search=keywords),
+        return_exceptions=True,
+    )
+
+    all_new = []
+    for r in results:
+        if isinstance(r, list):
+            all_new.extend(r)
+
+    if not all_new:
+        print("[Scraper] No targeted jobs fetched.")
+        return 0
+
+    # Filter fetched jobs to those relevant to target titles/keywords
+    target_titles = [t.lower() for t in search_profile.get("target_titles", [])]
+    kw_lower = [k.lower() for k in search_profile.get("search_keywords", [])]
+
+    def _is_relevant(job: Dict) -> bool:
+        if not target_titles and not kw_lower:
+            return True
+        text = f"{job.get('title', '')} {job.get('description', '')}".lower()
+        title_match = any(t in text for t in target_titles)
+        kw_match = sum(1 for k in kw_lower if k in text) >= 2
+        return title_match or kw_match
+
+    relevant = [j for j in all_new if _is_relevant(j)]
+    print(f"[Scraper] {len(all_new)} fetched, {len(relevant)} relevant after filtering")
+
+    if not relevant:
+        return 0
+
+    existing = get_all_jobs(limit=5000)
+    unique_jobs = _deduplicate(relevant, existing)
+    print(f"[Scraper] {len(unique_jobs)} new after dedup")
+
+    if not unique_jobs:
+        return 0
+
+    batch_size = 10
+    total_stored = 0
+    for i in range(0, len(unique_jobs), batch_size):
+        batch = unique_jobs[i:i + batch_size]
+        valid_batch, vectors = [], []
+        for job in batch:
+            text = f"{job.get('title','')} {job.get('company','')} {job.get('description','')[:300]} {' '.join(job.get('skills_required',[]))}"
+            try:
+                vec = await embed_text(text.strip() or "job listing")
+                if vec and isinstance(vec, list) and len(vec) > 0:
+                    valid_batch.append(job)
+                    vectors.append(vec)
+            except Exception as e:
+                print(f"[Scraper] Embedding failed: {e}")
+        if valid_batch:
+            total_stored += store_jobs_batch(valid_batch, vectors)
+
+    print(f"[Scraper] ✅ Targeted scrape stored {total_stored} new jobs")
+    return total_stored
+
 
 async def run_scrape() -> int:
     """Fetch jobs from all sources, deduplicate, embed, and store. Returns count added."""

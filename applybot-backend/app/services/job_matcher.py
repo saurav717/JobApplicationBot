@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
-from app.services.vector_store import search_jobs_by_vector, get_resume_vector, get_all_jobs
+from app.services.vector_store import search_jobs_by_vector, get_resume_vector, get_all_jobs, get_resume
 from app.services.llm import rerank_jobs
+from app.services.embeddings import embed_text_sync
 
 
 def match_jobs_to_resume(
@@ -11,20 +12,32 @@ def match_jobs_to_resume(
 ) -> List[Dict[str, Any]]:
     """
     Find the best matching jobs for a given resume.
-    1. Vector similarity search (Qdrant)
-    2. Optionally re-rank with Groq LLM
+    1. If the resume has a search_profile, embed the profile's search_query for richer vector search.
+       Otherwise fall back to the stored resume vector.
+    2. Optionally re-rank with Groq LLM using the full search profile for context.
     """
-    resume_vector = get_resume_vector(resume_id)
+    resume = get_resume(resume_id) or {}
+    search_profile = resume.get("search_profile")
 
-    if resume_vector and any(v != 0.0 for v in resume_vector):
-        # Use semantic vector search
+    # Use the search profile's rich search_query for the vector lookup when available.
+    # This captures "what role this person should be in" rather than just their raw resume text.
+    query_vector = None
+    if search_profile and search_profile.get("search_query"):
+        try:
+            query_vector = embed_text_sync(search_profile["search_query"])
+        except Exception as e:
+            print(f"[Matcher] Failed to embed search_query, falling back to resume vector: {e}")
+
+    if query_vector is None:
+        query_vector = get_resume_vector(resume_id)
+
+    if query_vector and any(v != 0.0 for v in query_vector):
         matched = search_jobs_by_vector(
-            query_vector=resume_vector,
-            limit=limit * 2,  # fetch more, then re-rank
-            filters=filters
+            query_vector=query_vector,
+            limit=limit * 2,
+            filters=filters,
         )
     else:
-        # Fallback: return all jobs ordered by id
         matched = get_all_jobs(limit=limit * 2)
         for job in matched:
             job.setdefault("relevancy_score", 0.5)
@@ -33,12 +46,14 @@ def match_jobs_to_resume(
         return []
 
     if use_llm_rerank:
-        from app.services.vector_store import get_resume
-        resume = get_resume(resume_id) or {}
         resume_text = resume.get("raw_text") or _build_resume_text(resume)
-        matched = rerank_jobs(resume_text, matched, limit=limit)
+        matched = rerank_jobs(
+            resume_text,
+            matched,
+            limit=limit,
+            search_profile=search_profile,
+        )
     else:
-        # Normalise relevancy_score to 0-1 range and cap at limit
         for job in matched:
             score = job.get("relevancy_score", 0.5)
             if score > 1.0:
