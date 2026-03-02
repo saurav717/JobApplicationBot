@@ -38,6 +38,7 @@ async def fetch_arbeitnow() -> List[Dict[str, Any]]:
                 "apply_url": item.get("url", ""),
                 "logo_url": f"https://logo.clearbit.com/{_domain_from_company(item.get('company_name',''))}",
                 "posted": item.get("created_at", ""),
+                "source_platform": "arbeitnow",
             })
         return jobs
     except Exception as e:
@@ -71,6 +72,7 @@ async def fetch_remotive(search: str = "") -> List[Dict[str, Any]]:
                     "apply_url": item.get("url", ""),
                     "logo_url": item.get("company_logo", ""),
                     "posted": item.get("publication_date", ""),
+                    "source_platform": "remotive",
                 }
                 for item in data.get("jobs", [])
             ]
@@ -90,6 +92,148 @@ async def fetch_remotive(search: str = "") -> List[Dict[str, Any]]:
 async def fetch_the_muse() -> List[Dict[str, Any]]:
     """Fetch jobs from The Muse public API (Currently returning 403, returning empty for now)."""
     return []
+
+
+async def fetch_remoteok() -> List[Dict[str, Any]]:
+    """Fetch jobs from RemoteOK (free, no API key needed)."""
+    url = "https://remoteok.com/api"
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            headers={"User-Agent": "Mozilla/5.0 ApplyBot/1.0"},
+        ) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            data = r.json()
+        jobs = []
+        # First element is a metadata object, skip it
+        for item in data[1:51] if len(data) > 1 else []:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("position", "")
+            company = item.get("company", "")
+            if not title or not company:
+                continue
+            tags = item.get("tags", []) or []
+            description = item.get("description", "") or ""
+            jobs.append({
+                "title": title,
+                "company": company,
+                "location": "Remote",
+                "type": "Remote",
+                "description": description[:2000],
+                "skills_required": [t for t in tags[:10] if isinstance(t, str)],
+                "apply_url": item.get("url", ""),
+                "logo_url": item.get("company_logo", ""),
+                "posted": item.get("date", ""),
+                "source_platform": "remoteok",
+            })
+        return jobs
+    except Exception as e:
+        print(f"[RemoteOK] Error: {e}")
+        return []
+
+
+async def fetch_jobicy() -> List[Dict[str, Any]]:
+    """Fetch remote jobs from Jobicy (free, no API key needed)."""
+    url = "https://jobicy.com/api/v2/remote-jobs"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(url, params={"count": 50, "geo": "anywhere", "industry": "engineering"})
+            r.raise_for_status()
+            data = r.json()
+        jobs = []
+        for item in data.get("jobs", []):
+            title = item.get("jobTitle", "")
+            company = item.get("companyName", "")
+            if not title or not company:
+                continue
+            description = item.get("jobDescription", "") or ""
+            jobs.append({
+                "title": title,
+                "company": company,
+                "location": item.get("jobGeo", "Remote"),
+                "type": item.get("jobType", "Remote"),
+                "description": description[:2000],
+                "skills_required": _extract_skills_from_text(description),
+                "apply_url": item.get("url", ""),
+                "logo_url": item.get("companyLogo", ""),
+                "posted": item.get("pubDate", ""),
+                "source_platform": "jobicy",
+            })
+        return jobs
+    except Exception as e:
+        print(f"[Jobicy] Error: {e}")
+        return []
+
+
+async def fetch_himalayas() -> List[Dict[str, Any]]:
+    """Fetch remote jobs from Himalayas.app (free, no API key needed)."""
+    url = "https://himalayas.app/jobs/api"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(url, params={"limit": 50})
+            r.raise_for_status()
+            data = r.json()
+        jobs = []
+        for item in data.get("jobs", []):
+            title = item.get("title", "")
+            company = item.get("companyName", "") or item.get("company", {}).get("name", "")
+            if not title or not company:
+                continue
+            description = item.get("description", "") or ""
+            jobs.append({
+                "title": title,
+                "company": company,
+                "location": item.get("locationRestrictions", ["Remote"])[0] if item.get("locationRestrictions") else "Remote",
+                "type": item.get("jobType", "Remote"),
+                "description": description[:2000],
+                "skills_required": _extract_skills_from_text(description),
+                "apply_url": item.get("applicationLink", ""),
+                "logo_url": item.get("companyLogo", ""),
+                "posted": item.get("createdAt", ""),
+                "source_platform": "himalayas",
+            })
+        return jobs
+    except Exception as e:
+        print(f"[Himalayas] Error: {e}")
+        return []
+
+
+async def fetch_findwork(search: str = "") -> List[Dict[str, Any]]:
+    """Fetch developer jobs from Findwork.dev (free, no API key needed)."""
+    url = "https://findwork.dev/api/jobs/"
+    try:
+        params: Dict[str, Any] = {"limit": 50, "order_by": "-date"}
+        if search:
+            params["search"] = search
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+        jobs = []
+        for item in data.get("results", []):
+            title = item.get("role", "")
+            company = item.get("company_name", "")
+            if not title or not company:
+                continue
+            keywords = item.get("keywords", []) or []
+            jobs.append({
+                "title": title,
+                "company": company,
+                "location": item.get("location", "Remote"),
+                "type": "Remote" if item.get("remote") else "Full-time",
+                "description": item.get("text", "")[:2000],
+                "skills_required": [k for k in keywords[:10] if isinstance(k, str)],
+                "apply_url": item.get("url", ""),
+                "logo_url": item.get("logo", ""),
+                "posted": item.get("date_posted", ""),
+                "source_platform": "findwork",
+            })
+        return jobs
+    except Exception as e:
+        print(f"[Findwork] Error: {e}")
+        return []
 
 
 # ── Deduplication ──────────────────────────────────────────────────────────
@@ -125,6 +269,10 @@ async def run_resume_targeted_scrape(search_profile: Dict[str, Any]) -> int:
     results = await asyncio.gather(
         fetch_arbeitnow(),
         fetch_remotive(search=keywords),
+        fetch_remoteok(),
+        fetch_jobicy(),
+        fetch_himalayas(),
+        fetch_findwork(search=keywords),
         return_exceptions=True,
     )
 
@@ -199,6 +347,10 @@ async def run_scrape() -> int:
         fetch_arbeitnow(),
         fetch_remotive(),
         fetch_the_muse(),
+        fetch_remoteok(),
+        fetch_jobicy(),
+        fetch_himalayas(),
+        fetch_findwork(),
         return_exceptions=True,
     )
 

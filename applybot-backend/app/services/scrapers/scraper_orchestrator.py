@@ -45,6 +45,7 @@ class ScraperOrchestrator:
         """
         Initialize all scrapers with the user's stored credentials.
         Returns {platform: initialized_successfully}.
+        Skips scrapers that fail to auth and continues with the rest.
         """
         results: Dict[str, bool] = {}
 
@@ -62,20 +63,38 @@ class ScraperOrchestrator:
                 results[platform] = False
                 continue
 
-            try:
-                scraper = scraper_cls(creds) if creds else scraper_cls()
-                auth_ok = await scraper.authenticate()
-                if auth_ok:
-                    self.scrapers[platform] = scraper
-                    results[platform] = True
-                    logger.info("[Orchestrator] %s initialized", platform)
-                else:
-                    results[platform] = False
-                    if self.credential_manager:
-                        self.credential_manager.mark_invalid(user_id, platform)
-            except Exception as exc:
-                logger.exception("[Orchestrator] Error initializing %s: %s", platform, exc)
+            # Retry auth up to 2 times with a small delay
+            initialized = False
+            for attempt in range(2):
+                try:
+                    scraper = scraper_cls(creds) if creds else scraper_cls()
+                    auth_ok = await asyncio.wait_for(scraper.authenticate(), timeout=30)
+                    if auth_ok:
+                        self.scrapers[platform] = scraper
+                        results[platform] = True
+                        initialized = True
+                        logger.info("[Orchestrator] %s initialized (attempt %d)", platform, attempt + 1)
+                        break
+                    else:
+                        logger.warning("[Orchestrator] %s auth returned False (attempt %d)", platform, attempt + 1)
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                except asyncio.TimeoutError:
+                    logger.warning("[Orchestrator] %s auth timed out (attempt %d)", platform, attempt + 1)
+                    if attempt == 0:
+                        await asyncio.sleep(2)
+                except Exception as exc:
+                    logger.exception("[Orchestrator] Error initializing %s (attempt %d): %s", platform, attempt + 1, exc)
+                    if attempt == 0:
+                        await asyncio.sleep(2)
+
+            if not initialized:
                 results[platform] = False
+                if self.credential_manager and creds:
+                    try:
+                        self.credential_manager.mark_invalid(user_id, platform)
+                    except Exception:
+                        pass
 
         # Workday (multiple instances per user)
         if self.credential_manager:
@@ -86,20 +105,33 @@ class ScraperOrchestrator:
                 if not workday_url:
                     continue
                 key = f"workday_{company}"
-                try:
-                    scraper = WorkdayScraper(
-                        credentials=cred,
-                        workday_url=workday_url,
-                        company_name=company,
-                    )
-                    if await scraper.authenticate():
-                        self.scrapers[key] = scraper
-                        results[key] = True
-                        logger.info("[Orchestrator] Workday/%s initialized", company)
-                    else:
-                        results[key] = False
-                except Exception as exc:
-                    logger.exception("[Orchestrator] Error initializing Workday/%s: %s", company, exc)
+                initialized = False
+                for attempt in range(2):
+                    try:
+                        scraper = WorkdayScraper(
+                            credentials=cred,
+                            workday_url=workday_url,
+                            company_name=company,
+                        )
+                        auth_ok = await asyncio.wait_for(scraper.authenticate(), timeout=30)
+                        if auth_ok:
+                            self.scrapers[key] = scraper
+                            results[key] = True
+                            initialized = True
+                            logger.info("[Orchestrator] Workday/%s initialized (attempt %d)", company, attempt + 1)
+                            break
+                        else:
+                            if attempt == 0:
+                                await asyncio.sleep(2)
+                    except asyncio.TimeoutError:
+                        logger.warning("[Orchestrator] Workday/%s auth timed out (attempt %d)", company, attempt + 1)
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                    except Exception as exc:
+                        logger.exception("[Orchestrator] Error initializing Workday/%s (attempt %d): %s", company, attempt + 1, exc)
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                if not initialized:
                     results[key] = False
 
         return results
@@ -126,10 +158,11 @@ class ScraperOrchestrator:
     ) -> List[ScrapedJob]:
         """
         Search all initialized scrapers in parallel.
-        Returns deduplicated results sorted by completeness score.
+        Returns partial deduplicated results even if some scrapers fail.
+        Logs detailed per-platform errors and continues with working scrapers.
         """
         if not self.scrapers:
-            logger.warning("[Orchestrator] No scrapers initialized")
+            logger.warning("[Orchestrator] No scrapers initialized — returning empty results")
             return []
 
         tasks: List[Tuple[str, asyncio.Task]] = []
@@ -146,18 +179,38 @@ class ScraperOrchestrator:
             tasks.append((platform, task))
 
         all_jobs: List[ScrapedJob] = []
+        succeeded = 0
+        failed = 0
+
         for platform, task in tasks:
             try:
                 jobs = await asyncio.wait_for(task, timeout=120)
-                logger.info("[Orchestrator] %s: %d jobs", platform, len(jobs))
+                if not isinstance(jobs, list):
+                    jobs = []
+                logger.info("[Orchestrator] %s: %d jobs returned", platform, len(jobs))
                 all_jobs.extend(jobs)
                 self._scrape_status[platform] = "ok"
+                succeeded += 1
             except asyncio.TimeoutError:
-                logger.warning("[Orchestrator] %s timed out", platform)
+                logger.warning("[Orchestrator] %s timed out after 120s — continuing with other scrapers", platform)
                 self._scrape_status[platform] = "timeout"
+                failed += 1
             except Exception as exc:
-                logger.exception("[Orchestrator] %s error: %s", platform, exc)
-                self._scrape_status[platform] = "error"
+                logger.error(
+                    "[Orchestrator] %s raised an error: %s — continuing with other scrapers",
+                    platform,
+                    exc,
+                    exc_info=True,
+                )
+                self._scrape_status[platform] = f"error: {type(exc).__name__}"
+                failed += 1
+
+        logger.info(
+            "[Orchestrator] Search complete: %d platforms succeeded, %d failed, %d total jobs collected",
+            succeeded,
+            failed,
+            len(all_jobs),
+        )
 
         unique = self._deduplicate_jobs(all_jobs)
         logger.info("[Orchestrator] %d total -> %d unique after dedup", len(all_jobs), len(unique))

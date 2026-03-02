@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
 import { Sparkles, Zap, Shield, ArrowRight, Bot, ChevronRight, Upload, FileText, CheckCircle2, Loader2, X, User, ChevronDown, ChevronUp } from 'lucide-react';
-import { uploadResume, getStoredToken, getStoredUser, clearStoredToken } from './api';
+import { uploadResume, getStoredToken, getStoredUser, clearStoredToken, storePlatformCredential } from './api';
 import LoginForm from './components/Auth/LoginForm';
 import RegisterForm from './components/Auth/RegisterForm';
 import PlatformCredentialsForm from './components/Auth/PlatformCredentialsForm';
+import PlatformConnectModal from './components/Auth/PlatformConnectModal';
 import ConnectionStatus from './components/common/ConnectionStatus';
 
 export default function LandingPage({ onStart }) {
@@ -24,6 +25,7 @@ export default function LandingPage({ onStart }) {
     // Platform credentials state
     const [showCredentials, setShowCredentials] = useState(false);
     const [connectedPlatforms, setConnectedPlatforms] = useState({});
+    const [connectingPlatform, setConnectingPlatform] = useState(null); // Platform being connected via modal
 
     const handleAuthSuccess = (data) => {
         setAuthToken(data.access_token);
@@ -266,6 +268,22 @@ export default function LandingPage({ onStart }) {
                                         }
                                     </div>
                                 </button>
+                                {/* Quick-connect buttons using the new modal */}
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    {['linkedin', 'glassdoor', 'indeed', 'jobright', 'workday'].map(p => (
+                                        <button
+                                            key={p}
+                                            onClick={() => setConnectingPlatform(p)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                                                connectedPlatforms[p]
+                                                    ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
+                                                    : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:text-white hover:border-slate-600'
+                                            }`}
+                                        >
+                                            {connectedPlatforms[p] ? '✓ ' : ''}{p.charAt(0).toUpperCase() + p.slice(1)}
+                                        </button>
+                                    ))}
+                                </div>
                                 {showCredentials && (
                                     <div className="mt-4">
                                         <PlatformCredentialsForm
@@ -339,6 +357,28 @@ export default function LandingPage({ onStart }) {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Platform Connect Modal */}
+            {connectingPlatform && (
+                <PlatformConnectModal
+                    platform={connectingPlatform}
+                    onClose={() => setConnectingPlatform(null)}
+                    onConnect={async (creds) => {
+                        if (authToken) {
+                            await storePlatformCredential(
+                                creds.platform,
+                                creds.email,
+                                creds.password,
+                                creds.workday_url,
+                                creds.company_name,
+                                authToken,
+                            );
+                        }
+                        handlePlatformConnect(creds.platform);
+                        setConnectingPlatform(null);
+                    }}
+                />
             )}
 
             {/* Features Grid */}

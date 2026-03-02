@@ -3,6 +3,7 @@ Abstract base class for all job scrapers.
 """
 
 import asyncio
+import hashlib
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -41,6 +42,18 @@ class ScrapedJob:
     company_logo_url: Optional[str] = None
     company_rating: Optional[float] = None   # Glassdoor rating
     ats_type: Optional[str] = None           # "workday" | "lever" | "greenhouse" etc.
+
+
+def generate_job_id(platform: str, company: str, title: str, url: str = "") -> str:
+    """
+    Generate a unique, deterministic job ID based on content.
+    Hashes (platform + company + title + url) to ensure no two distinct
+    job postings share the same ID even within the same company.
+    """
+    unique_string = f"{platform}:{company.lower().strip()}:{title.lower().strip()}:{url}"
+    hash_id = hashlib.sha256(unique_string.encode()).hexdigest()[:16]
+    safe_platform = platform.replace(" ", "_")[:20]
+    return f"{safe_platform}_{hash_id}"
 
 
 class BaseScraper(ABC):
