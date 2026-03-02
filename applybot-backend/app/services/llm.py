@@ -14,9 +14,15 @@ def get_client() -> Groq:
     return _client
 
 
-def rerank_jobs(resume_text: str, jobs: List[Dict[str, Any]], limit: int = 20) -> List[Dict[str, Any]]:
+def rerank_jobs(
+    resume_text: str,
+    jobs: List[Dict[str, Any]],
+    limit: int = 20,
+    search_profile: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     """
     Use Groq LLM to re-rank jobs by relevance to the resume.
+    Optionally uses a search_profile for richer context (target titles, industries, seniority).
     Returns enriched job dicts with relevancy_score, match_reasons, skill_matches, missing_skills.
     """
     if not jobs:
@@ -28,22 +34,41 @@ def rerank_jobs(resume_text: str, jobs: List[Dict[str, Any]], limit: int = 20) -
     for i, job in enumerate(jobs[:30]):  # cap at 30 for token budget
         job_summaries.append(
             f"Job {i}: {job.get('title', 'N/A')} at {job.get('company', 'N/A')} | "
-            f"Dept: {job.get('department', 'N/A')} | "
+            f"Location: {job.get('location', 'N/A')} | "
             f"Skills: {', '.join(job.get('skills_required', []))}"
         )
 
-    prompt = f"""You are an expert job-matching AI. Given the resume summary and job listings below, 
-score each job from 0-100 for relevance.
+    profile_context = ""
+    if search_profile:
+        profile_context = f"""
+CANDIDATE PROFILE:
+Who they are: {search_profile.get('candidate_summary', '')}
+Target roles: {', '.join(search_profile.get('target_titles', []))}
+Target industries: {', '.join(search_profile.get('target_industries', []))}
+Seniority: {search_profile.get('seniority', 'mid')}
+Key strengths: {', '.join(search_profile.get('key_strengths', []))}
 
+Prioritize jobs that match the target roles and industries above.
+Penalize jobs that are too junior/senior or in unrelated fields.
+"""
+
+    prompt = f"""You are an expert job-matching AI. Score each job 0-100 for relevance to this candidate.
+{profile_context}
 RESUME (first 1000 chars):
 {resume_text[:1000]}
 
 JOBS:
 {chr(10).join(job_summaries)}
 
+Scoring guidance:
+- 90-100: Excellent match — title, industry, and skills align perfectly
+- 70-89: Good match — most requirements fit, minor gaps
+- 50-69: Partial match — some relevant skills but significant gaps or wrong industry
+- Below 50: Poor match — different field, wrong seniority, or missing core skills
+
 Respond ONLY with a JSON array like:
 [
-  {{"job_index": 0, "score": 85, "match_reasons": ["Strong Python match"], "skill_matches": ["Python"], "missing_skills": ["Scala"]}},
+  {{"job_index": 0, "score": 85, "match_reasons": ["Strong Python match", "FinTech industry match"], "skill_matches": ["Python"], "missing_skills": ["Scala"]}},
   ...
 ]
 Include ALL {len(job_summaries)} jobs. Sort by score descending."""
@@ -78,6 +103,83 @@ Include ALL {len(job_summaries)} jobs. Sort by score descending."""
             result.append(enriched)
 
     return result[:limit]
+
+
+def generate_job_search_profile(resume_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Holistically understand the resume and generate a targeted job search profile.
+    The LLM figures out what this person does, what roles suit them, and what to prioritize.
+    Returns a dict with candidate_summary, target_titles, target_industries, seniority,
+    search_keywords, search_query, preferred_remote, key_strengths.
+    """
+    client = get_client()
+
+    experience_text = "\n".join(
+        exp.get("raw", "") for exp in resume_data.get("experience", [])[:5]
+    )
+    education_text = "\n".join(
+        edu.get("raw", "") for edu in resume_data.get("education", [])[:3]
+    )
+
+    prompt = f"""You are an expert career counselor. Analyze this resume and generate a targeted job search profile.
+
+RESUME:
+Name: {resume_data.get('name', '')}
+Location: {resume_data.get('location', '')}
+Summary: {resume_data.get('summary', '')}
+Skills: {', '.join(resume_data.get('skills', []))}
+
+Experience:
+{experience_text}
+
+Education:
+{education_text}
+
+Based on this resume, produce a job search profile that captures what this person does and what roles they should target.
+
+Respond ONLY with a JSON object:
+{{
+  "candidate_summary": "2-3 sentence plain-English description of this person's expertise and background",
+  "target_titles": ["Job Title 1", "Job Title 2", "Job Title 3", "Job Title 4", "Job Title 5"],
+  "target_industries": ["Industry 1", "Industry 2", "Industry 3"],
+  "seniority": "entry or mid or senior or lead or executive",
+  "search_keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
+  "search_query": "A rich 3-5 sentence natural-language query that describes the ideal job for this candidate — written as if it were a job description matching their background",
+  "preferred_remote": true,
+  "key_strengths": ["strength1", "strength2", "strength3"]
+}}
+
+Rules:
+- target_titles must be specific and realistic (e.g. "Senior Python Backend Engineer", not "Software Developer")
+- search_keywords are the most important technical/domain terms for their profile
+- search_query should be comprehensive enough to match relevant job postings via semantic search
+- Do NOT invent skills or experience not present in the resume"""
+
+    try:
+        response = client.chat.completions.create(
+            model=GROQ_PARSE_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=1000,
+        )
+        content = response.choices[0].message.content.strip()
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON in response")
+        return json.loads(content[start:end])
+    except Exception as e:
+        print(f"[LLM job profile error] {e} — using fallback profile")
+        return {
+            "candidate_summary": resume_data.get("summary", ""),
+            "target_titles": [],
+            "target_industries": [],
+            "seniority": "mid",
+            "search_keywords": resume_data.get("skills", [])[:5],
+            "search_query": (resume_data.get("summary", "") + " " + " ".join(resume_data.get("skills", []))).strip(),
+            "preferred_remote": True,
+            "key_strengths": [],
+        }
 
 
 def parse_resume_with_llm(raw_text: str) -> Dict[str, Any]:

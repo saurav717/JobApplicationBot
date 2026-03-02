@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react';
-import { Sparkles, Zap, Shield, ArrowRight, Bot, ChevronRight, Upload, FileText, CheckCircle2, Loader2, Cpu, X } from 'lucide-react';
+import { Sparkles, Zap, Shield, ArrowRight, Bot, ChevronRight, Upload, FileText, CheckCircle2, Loader2, X } from 'lucide-react';
 import { uploadResume } from './api';
-import { llmOptions } from './data';
 
 export default function LandingPage({ onStart }) {
     const [dragOver, setDragOver] = useState(false);
@@ -9,7 +8,7 @@ export default function LandingPage({ onStart }) {
     const [uploading, setUploading] = useState(false);
     const [uploadError, setUploadError] = useState('');
     const [resumeData, setResumeData] = useState(null);
-    const [selectedLLM, setSelectedLLM] = useState('claude-sonnet');
+    const [selectedLLM] = useState('llama-3.3-70b');
     const fileInputRef = useRef(null);
 
     const companyLogos = ['stripe.com', 'coinbase.com', 'palantir.com', 'plaid.com', 'datadoghq.com'];
@@ -169,19 +168,15 @@ export default function LandingPage({ onStart }) {
                                 <p className="mt-3 text-sm text-red-400 text-center">{uploadError}</p>
                             )}
 
-                            {/* LLM Selector */}
-                            <div className="mt-5 flex items-center gap-3">
-                                <Cpu className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                                <label className="text-sm text-slate-400 flex-shrink-0">Score with:</label>
-                                <select
-                                    value={selectedLLM}
-                                    onChange={(e) => setSelectedLLM(e.target.value)}
-                                    className="flex-1 px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-700/50 text-sm text-white outline-none focus:border-indigo-500/50 appearance-none cursor-pointer"
-                                >
-                                    {llmOptions.map(l => (
-                                        <option key={l.id} value={l.id}>{l.name} — {l.description}</option>
-                                    ))}
-                                </select>
+                            {/* Powered-by badge */}
+                            <div className="mt-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                                <span className="text-xs text-slate-400">Powered by</span>
+                                <span className="text-xs font-semibold text-indigo-300">Groq</span>
+                                <span className="text-slate-600">·</span>
+                                <span className="text-xs text-slate-400">Llama 3.3 70B</span>
+                                <span className="text-slate-600">·</span>
+                                <span className="text-xs text-slate-400">BAAI/bge embeddings</span>
+                                <span className="ml-auto text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Open Source</span>
                             </div>
 
                             {/* CTA Button */}
