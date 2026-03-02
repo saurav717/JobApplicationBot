@@ -1,6 +1,10 @@
 import { useState, useRef } from 'react';
-import { Sparkles, Zap, Shield, ArrowRight, Bot, ChevronRight, Upload, FileText, CheckCircle2, Loader2, X } from 'lucide-react';
-import { uploadResume } from './api';
+import { Sparkles, Zap, Shield, ArrowRight, Bot, ChevronRight, Upload, FileText, CheckCircle2, Loader2, X, User, ChevronDown, ChevronUp } from 'lucide-react';
+import { uploadResume, getStoredToken, getStoredUser, clearStoredToken } from './api';
+import LoginForm from './components/Auth/LoginForm';
+import RegisterForm from './components/Auth/RegisterForm';
+import PlatformCredentialsForm from './components/Auth/PlatformCredentialsForm';
+import ConnectionStatus from './components/common/ConnectionStatus';
 
 export default function LandingPage({ onStart }) {
     const [dragOver, setDragOver] = useState(false);
@@ -10,6 +14,33 @@ export default function LandingPage({ onStart }) {
     const [resumeData, setResumeData] = useState(null);
     const [selectedLLM] = useState('llama-3.3-70b');
     const fileInputRef = useRef(null);
+
+    // Auth state
+    const [authToken, setAuthToken] = useState(() => getStoredToken());
+    const [authUser, setAuthUser] = useState(() => getStoredUser());
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+
+    // Platform credentials state
+    const [showCredentials, setShowCredentials] = useState(false);
+    const [connectedPlatforms, setConnectedPlatforms] = useState({});
+
+    const handleAuthSuccess = (data) => {
+        setAuthToken(data.access_token);
+        setAuthUser(data.user);
+        setShowAuthModal(false);
+    };
+
+    const handleSignOut = () => {
+        clearStoredToken();
+        setAuthToken(null);
+        setAuthUser(null);
+        setConnectedPlatforms({});
+    };
+
+    const handlePlatformConnect = (platformId) => {
+        setConnectedPlatforms(prev => ({ ...prev, [platformId]: true }));
+    };
 
     const companyLogos = ['stripe.com', 'coinbase.com', 'palantir.com', 'plaid.com', 'datadoghq.com'];
 
@@ -83,9 +114,24 @@ export default function LandingPage({ onStart }) {
                 <div className="flex items-center gap-8">
                     <a href="#features" className="text-white/50 hover:text-white transition-all duration-300 text-sm">Features</a>
                     <a href="#how-it-works" className="text-white/50 hover:text-white transition-all duration-300 text-sm">How it Works</a>
-                    <button className="px-5 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-sm text-white/80 hover:bg-slate-700/50 hover:text-white transition-all duration-300 backdrop-blur-xl">
-                        Sign In
-                    </button>
+                    {authUser ? (
+                        <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-2 text-sm text-slate-300">
+                                <User className="w-4 h-4 text-indigo-400" />
+                                {authUser.name || authUser.email}
+                            </span>
+                            <button onClick={handleSignOut} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-xs text-slate-400 hover:text-white hover:bg-slate-700/50 transition-all duration-300">
+                                Sign Out
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
+                            className="px-5 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-sm text-white/80 hover:bg-slate-700/50 hover:text-white transition-all duration-300 backdrop-blur-xl"
+                        >
+                            Sign In
+                        </button>
+                    )}
                 </div>
             </nav>
 
@@ -200,6 +246,60 @@ export default function LandingPage({ onStart }) {
                         </div>
                     </div>
 
+                    {/* Platform Credentials Section */}
+                    {authToken && (
+                        <div className="mt-4 p-[1px] rounded-2xl bg-gradient-to-r from-indigo-600/30 via-purple-600/30 to-teal-600/30">
+                            <div className="bg-slate-900/90 backdrop-blur-xl rounded-2xl p-5">
+                                <button
+                                    onClick={() => setShowCredentials(!showCredentials)}
+                                    className="w-full flex items-center justify-between text-left"
+                                >
+                                    <div>
+                                        <p className="text-sm font-semibold text-white">Platform Credentials</p>
+                                        <p className="text-xs text-slate-500 mt-0.5">Connect job platforms for broader scraping</p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <ConnectionStatus platforms={connectedPlatforms} />
+                                        {showCredentials
+                                            ? <ChevronUp className="w-4 h-4 text-slate-400" />
+                                            : <ChevronDown className="w-4 h-4 text-slate-400" />
+                                        }
+                                    </div>
+                                </button>
+                                {showCredentials && (
+                                    <div className="mt-4">
+                                        <PlatformCredentialsForm
+                                            token={authToken}
+                                            connectedPlatforms={connectedPlatforms}
+                                            onConnect={handlePlatformConnect}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {!authToken && (
+                        <div className="mt-4 p-3 rounded-xl bg-slate-800/30 border border-slate-700/30 text-center">
+                            <p className="text-xs text-slate-500">
+                                <button
+                                    onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}
+                                    className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                                >
+                                    Create an account
+                                </button>
+                                {' '}or{' '}
+                                <button
+                                    onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
+                                    className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                                >
+                                    sign in
+                                </button>
+                                {' '}to connect LinkedIn, Glassdoor & more
+                            </p>
+                        </div>
+                    )}
+
                     {/* Company logos */}
                     <div className="flex items-center justify-center gap-6 mt-6">
                         <span className="text-sm text-slate-500">Works with:</span>
@@ -212,6 +312,34 @@ export default function LandingPage({ onStart }) {
                     </div>
                 </div>
             </section>
+
+            {/* Auth Modal */}
+            {showAuthModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowAuthModal(false)} />
+                    <div className="relative z-10 w-full max-w-md p-[1px] rounded-3xl bg-gradient-to-r from-indigo-600/50 via-purple-600/50 to-teal-600/50">
+                        <div className="bg-slate-900 rounded-3xl p-8">
+                            <button
+                                onClick={() => setShowAuthModal(false)}
+                                className="absolute top-4 right-4 p-2 rounded-lg hover:bg-slate-800 transition-all duration-300"
+                            >
+                                <X className="w-4 h-4 text-slate-400" />
+                            </button>
+                            {authMode === 'login' ? (
+                                <LoginForm
+                                    onSuccess={handleAuthSuccess}
+                                    onSwitchToRegister={() => setAuthMode('register')}
+                                />
+                            ) : (
+                                <RegisterForm
+                                    onSuccess={handleAuthSuccess}
+                                    onSwitchToLogin={() => setAuthMode('login')}
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Features Grid */}
             <section id="features" className="relative z-10 max-w-7xl mx-auto px-8 py-16">

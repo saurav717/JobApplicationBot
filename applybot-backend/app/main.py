@@ -3,13 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.routers import resumes, jobs, applications, scraper
+from app.routers import auth
 from app.services.vector_store import init_collections
 from app.services.scheduler import start_scheduler, stop_scheduler
+from app.models.database import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Starting ApplyBot Backend...")
+    try:
+        init_db()
+        print("✅ Database tables initialized")
+    except Exception as e:
+        print(f"⚠️  Database init warning: {e}")
     try:
         init_collections()
         print("✅ Qdrant collections initialized")
@@ -40,6 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)  # prefix="/api/auth" defined in router
 app.include_router(resumes.router, prefix="/api/resumes", tags=["Resumes"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
