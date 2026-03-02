@@ -4,7 +4,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import (
     VectorParams, Distance, PointStruct,
     Filter, FieldCondition, MatchValue,
-    SearchRequest as QSearchRequest,
+    QueryRequest,
 )
 from app.config import QDRANT_URL, QDRANT_API_KEY, JOBS_COLLECTION, RESUMES_COLLECTION, EMBEDDING_DIM
 
@@ -116,7 +116,7 @@ def search_jobs_by_vector(
     limit: int = 20,
     filters: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
-    """Vector similarity search over jobs collection."""
+    """Vector similarity search over jobs collection (qdrant-client 1.16+)."""
     client = get_client()
 
     qdrant_filter = None
@@ -128,16 +128,16 @@ def search_jobs_by_vector(
         if conditions:
             qdrant_filter = Filter(must=conditions)
 
-    results = client.search(
+    response = client.query_points(
         collection_name=JOBS_COLLECTION,
-        query_vector=query_vector,
+        query=query_vector,
         limit=limit,
         query_filter=qdrant_filter,
         with_payload=True,
     )
     return [
         {**r.payload, "relevancy_score": r.score}
-        for r in results
+        for r in response.points
     ]
 
 

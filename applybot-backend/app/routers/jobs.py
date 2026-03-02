@@ -106,7 +106,9 @@ async def search_jobs(request: SearchRequest):
 
 @router.post("/search/grouped")
 async def search_jobs_grouped(request: SearchRequest):
-    """Search jobs and group results by company."""
+    """Search jobs and group results by company.
+    Returns: { "CompanyName": [job, job, ...], ... }
+    """
     filters = request.filters.model_dump(exclude_none=True) if request.filters else None
 
     matched = match_jobs_to_resume(
@@ -116,10 +118,15 @@ async def search_jobs_grouped(request: SearchRequest):
         use_llm_rerank=request.use_llm_rerank,
     )
 
-    grouped = group_jobs_by_company(matched)
+    # Build flat { company_name: [jobs] } — exactly what JobBrowser.jsx expects
+    grouped: dict = {}
+    for job in matched:
+        company = job.get("company", "Unknown")
+        if company not in grouped:
+            grouped[company] = []
+        # Attach score directly on the job dict (frontend reads job.score)
+        job_out = {**job}
+        job_out["score"] = job_out.pop("relevancy_score", 0.5)
+        grouped[company].append(job_out)
 
-    return {
-        "companies": list(grouped.values()),
-        "total_jobs": len(matched),
-        "resume_id": request.resume_id,
-    }
+    return grouped
