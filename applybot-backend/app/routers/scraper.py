@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.routers.auth import get_current_user
@@ -265,6 +265,40 @@ async def _run_multi_platform_task(user_id: str, request: ScrapeRequest) -> None
     finally:
         state["completed_at"] = datetime.now(timezone.utc).isoformat()
         await orchestrator.close_all()
+
+
+# ── Company Discovery endpoint ─────────────────────────────────────────────
+
+class DiscoverRequest(BaseModel):
+    industries: List[str]
+    roles: List[str]
+    location: str = "United States"
+    limit: int = 20
+
+
+@router.post("/discover-companies")
+async def discover_companies(
+    request: DiscoverRequest,
+    current_user: Dict = Depends(get_current_user),
+):
+    """
+    Discover companies hiring for specific roles in given industries.
+    Uses SerpAPI (when configured) to find companies and identify their ATS type.
+    Returns a list of discovered companies with career page URLs.
+    """
+    import os
+    from app.services.company_discovery import CompanyDiscoveryService
+
+    serpapi_key = os.getenv("SERPAPI_KEY")
+    discovery = CompanyDiscoveryService(serpapi_key=serpapi_key)
+
+    companies = await discovery.discover_companies(
+        industries=request.industries,
+        roles=request.roles,
+        location=request.location,
+        limit=min(request.limit, 100),
+    )
+    return {"discovered": companies, "count": len(companies)}
 
 
 def _scraped_to_dict(job) -> Dict[str, Any]:

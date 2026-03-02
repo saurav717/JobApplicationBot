@@ -11,6 +11,7 @@ import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScrape
 import SourceBadge from './components/Jobs/SourceBadge';
 import ScrapeProgressBar from './components/Jobs/ScrapeProgressBar';
 import PlatformFilter from './components/Jobs/PlatformFilter';
+import EmbeddedApplicationForm from './components/Jobs/EmbeddedApplicationForm';
 import { continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
@@ -52,6 +53,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     // Generating Form State
     const [fillingStatus, setFillingStatus] = useState('idle'); // idle | filling | complete
     const [formData, setFormData] = useState(null);
+    const [showEmbedded, setShowEmbedded] = useState(false); // Toggle between AI form preview and embedded ATS form
 
     // Scraper status
     const [scraperStatus, setScraperStatus] = useState(null); // { last_run, jobs_scraped }
@@ -185,15 +187,21 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
         setCompanies(prev => prev.map(c => c.id === companyId ? { ...c, selected: !c.selected } : c));
     };
 
-    const toggleJobSelection = (jobId, e) => {
+    // Build a stable unique key for a job combining platform + id to prevent
+    // accidental cross-company/cross-platform collisions
+    const jobKey = (job) => `${job.source_platform || 'unknown'}-${job.id}`;
+
+    const toggleJobSelection = (job, e) => {
         e && e.stopPropagation();
-        setSelectedJobs(prev => ({ ...prev, [jobId]: !prev[jobId] }));
+        const key = jobKey(job);
+        setSelectedJobs(prev => ({ ...prev, [key]: !prev[key] }));
     };
 
     const handleJobClick = async (job, company) => {
         setSelectedJob({ ...job, company });
         setFillingStatus('filling');
         setFormData(null);
+        setShowEmbedded(false);
         try {
             // Call actual AI generation endpoint
             const formRes = await generateForm(job.id, resumeId);
@@ -298,7 +306,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                             <span className="text-purple-400 font-medium">{totalJobs}</span>
                             <span className="text-slate-500">jobs</span>
                         </div>
-                        <button disabled={Object.keys(selectedJobs).length === 0} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <button disabled={Object.values(selectedJobs).filter(Boolean).length === 0} className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                             Apply to {Object.values(selectedJobs).filter(Boolean).length} Selected <ArrowRight className="w-4 h-4" />
                         </button>
                     </div>
@@ -466,7 +474,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
                             {/* The jobs are naturally sorted by score from the backend, but we'll sort explicitly just in case */}
                             {[...selectedCompany.jobs].sort((a, b) => (b.score || 0) - (a.score || 0)).map(job => (
-                                <div key={job.id} className={`rounded-xl border transition-all duration-300 cursor-pointer ${selectedJob?.id === job.id ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-900/30 border-slate-800/50 hover:bg-slate-800/30'}`}>
+                                <div key={jobKey(job)} className={`rounded-xl border transition-all duration-300 cursor-pointer ${selectedJob?.id === job.id ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-900/30 border-slate-800/50 hover:bg-slate-800/30'}`}>
                                     <div className="p-3" onClick={() => handleJobClick(job, selectedCompany)}>
                                         <div className="flex items-start justify-between gap-2 mb-1">
                                             <h3 className="font-semibold text-sm text-white leading-tight">{job.title}</h3>
@@ -485,8 +493,8 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                                 <button onClick={(e) => toggleJobExpand(job.id, e)} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
                                                     {expandedJobs[job.id] ? <>Collapse <ChevronUp className="w-3 h-3" /></> : <>Expand JD <ChevronDown className="w-3 h-3" /></>}
                                                 </button>
-                                                <button onClick={(e) => toggleJobSelection(job.id, e)} className={`ml-1 p-1 rounded-md transition-all duration-300 ${selectedJobs[job.id] ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800/50 text-slate-500'}`}>
-                                                    {selectedJobs[job.id] ? <Check className="w-3 h-3" /> : <Briefcase className="w-3 h-3" />}
+                                                <button onClick={(e) => toggleJobSelection(job, e)} className={`ml-1 p-1 rounded-md transition-all duration-300 ${selectedJobs[jobKey(job)] ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800/50 text-slate-500'}`}>
+                                                    {selectedJobs[jobKey(job)] ? <Check className="w-3 h-3" /> : <Briefcase className="w-3 h-3" />}
                                                 </button>
                                             </div>
                                         </div>
@@ -536,7 +544,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <button onClick={() => handleJobClick(job, selectedCompany)} className="flex-1 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-all duration-300">View Application Form</button>
-                                                <button onClick={(e) => toggleJobSelection(job.id, e)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${selectedJobs[job.id] ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'}`}>{selectedJobs[job.id] ? '✓ Selected' : 'Select'}</button>
+                                                <button onClick={(e) => toggleJobSelection(job, e)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${selectedJobs[jobKey(job)] ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'}`}>{selectedJobs[jobKey(job)] ? '✓ Selected' : 'Select'}</button>
                                             </div>
                                         </div>
                                     )}
@@ -572,11 +580,39 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                         <span className="text-emerald-400">{selectedJob.salary || ''}</span>
                                     </div>
                                 </div>
-                                <button onClick={() => { setSelectedJob(null); setFillingStatus('idle'); }} className="p-2 rounded-lg hover:bg-slate-800 transition-all duration-300">
-                                    <X className="w-5 h-5 text-slate-400" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {/* Toggle between AI preview and embedded form */}
+                                    <div className="flex rounded-lg overflow-hidden border border-slate-700/50 text-xs">
+                                        <button
+                                            onClick={() => setShowEmbedded(false)}
+                                            className={`px-3 py-1.5 transition-all ${!showEmbedded ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800/50 text-slate-500 hover:text-slate-300'}`}
+                                        >
+                                            AI Form
+                                        </button>
+                                        <button
+                                            onClick={() => setShowEmbedded(true)}
+                                            className={`px-3 py-1.5 transition-all ${showEmbedded ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800/50 text-slate-500 hover:text-slate-300'}`}
+                                        >
+                                            Apply Form
+                                        </button>
+                                    </div>
+                                    <button onClick={() => { setSelectedJob(null); setFillingStatus('idle'); setShowEmbedded(false); }} className="p-2 rounded-lg hover:bg-slate-800 transition-all duration-300">
+                                        <X className="w-5 h-5 text-slate-400" />
+                                    </button>
+                                </div>
                             </div>
                         </div>
+
+                        {/* Embedded Application Form (when toggled) */}
+                        {showEmbedded ? (
+                            <EmbeddedApplicationForm
+                                job={selectedJob}
+                                formData={formData}
+                                fillingStatus={fillingStatus}
+                                onAutoFillClick={() => {}}
+                            />
+                        ) : (
+                        <>
 
                         {/* AI Status */}
                         <div className={`flex-shrink-0 mx-6 mt-4 flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${fillingStatus === 'idle' ? 'bg-slate-800/50 border border-slate-700/50' : fillingStatus === 'filling' ? 'bg-indigo-500/10 border border-indigo-500/30' : 'bg-teal-500/10 border border-teal-500/30'}`}>
@@ -661,13 +697,16 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
 
                         {/* Submit */}
                         <div className="flex-shrink-0 p-6 border-t border-slate-800/50 flex items-center gap-4">
-                            <button disabled={fillingStatus !== 'complete'} onClick={(e) => toggleJobSelection(selectedJob.id, e)} className={`flex-1 py-3 rounded-xl font-medium transition-all duration-300 ${selectedJobs[selectedJob.id] ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg hover:shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
-                                {selectedJobs[selectedJob.id] ? '✓ Added to Queue' : 'Add to Apply Queue'}
+                            <button disabled={fillingStatus !== 'complete'} onClick={(e) => toggleJobSelection(selectedJob, e)} className={`flex-1 py-3 rounded-xl font-medium transition-all duration-300 ${selectedJobs[jobKey(selectedJob)] ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg hover:shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+                                {selectedJobs[jobKey(selectedJob)] ? '✓ Added to Queue' : 'Add to Apply Queue'}
                             </button>
                             <a href={selectedJob.apply_url} target="_blank" rel="noopener noreferrer" className="px-6 py-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-400 font-medium hover:bg-slate-700/50 transition-all duration-300 flex items-center gap-2">
                                 Apply Direct <Globe className="w-4 h-4" />
                             </a>
                         </div>
+
+                        </>
+                        )}
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center flex-1 text-center px-8">
