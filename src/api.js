@@ -64,11 +64,20 @@ export async function generateForm(jobId, resumeId, customInstructions = null) {
 }
 
 /**
- * Manually trigger a job scrape.
+ * Manually trigger a generic job scrape.
  */
 export async function triggerScrape() {
     const res = await fetch(`${BASE_URL}/api/scraper/run`, { method: 'POST' });
     if (!res.ok) throw new Error(`Scrape trigger failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Trigger a resume-targeted job scrape using the candidate's search profile.
+ */
+export async function triggerResumeTargetedScrape(resumeId) {
+    const res = await fetch(`${BASE_URL}/api/scraper/run-for-resume/${resumeId}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`Targeted scrape failed: ${res.status}`);
     return res.json();
 }
 
