@@ -109,6 +109,7 @@ async def run_resume_targeted_scrape(search_profile: Dict[str, Any]) -> int:
     Uses the profile's keywords and target titles to fetch more relevant jobs.
     Returns count of new jobs stored.
     """
+    global _last_run, _jobs_scraped
     keywords = " ".join(search_profile.get("search_keywords", [])[:5])
     print(f"[Scraper] Targeted scrape for: '{keywords}'")
 
@@ -169,6 +170,8 @@ async def run_resume_targeted_scrape(search_profile: Dict[str, Any]) -> int:
         if valid_batch:
             total_stored += store_jobs_batch(valid_batch, vectors)
 
+    _last_run = datetime.now(timezone.utc).isoformat()
+    _jobs_scraped = total_stored
     print(f"[Scraper] ✅ Targeted scrape stored {total_stored} new jobs")
     return total_stored
 

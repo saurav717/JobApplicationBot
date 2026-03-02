@@ -54,23 +54,32 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     const [scraperStatus, setScraperStatus] = useState(null); // { last_run, jobs_scraped }
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // Refresh: trigger targeted scrape then reload jobs
+    // Refresh: trigger targeted scrape, poll until status updates, then reload jobs
     const refreshJobs = async () => {
         if (isRefreshing || loadingJobs) return;
         setIsRefreshing(true);
+        const prevLastRun = scraperStatus?.last_run || 'Never';
         try {
             await triggerResumeTargetedScrape(resumeId);
         } catch (e) {
             console.warn('Scrape trigger failed:', e);
         }
-        // Give the background scrape a moment to start, then re-search
-        await new Promise(r => setTimeout(r, 3000));
+        // Poll scraper status every 4 seconds until last_run changes (max 90s)
+        const maxWait = 90000;
+        const pollInterval = 4000;
+        let elapsed = 0;
+        while (elapsed < maxWait) {
+            await new Promise(r => setTimeout(r, pollInterval));
+            elapsed += pollInterval;
+            try {
+                const s = await getScraperStatus();
+                if (s.last_run && s.last_run !== 'Never' && s.last_run !== prevLastRun) {
+                    setScraperStatus(s);
+                    break;
+                }
+            } catch (_) {}
+        }
         await loadJobs();
-        // Refresh status after reload
-        try {
-            const s = await getScraperStatus();
-            setScraperStatus(s);
-        } catch (_) {}
         setIsRefreshing(false);
     };
 
@@ -215,7 +224,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     const totalJobs = companies.filter(c => c.selected).reduce((a, c) => a + c.jobs.length, 0);
 
     return (
-        <div className="flex flex-col min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 text-white">
+        <div className="flex flex-col h-screen overflow-hidden bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 text-white">
             {/* Header */}
             <header className="flex-shrink-0 sticky top-0 z-30 bg-slate-950/95 backdrop-blur-xl border-b border-slate-800/50 px-6 py-3">
                 <div className="flex items-center justify-between">
