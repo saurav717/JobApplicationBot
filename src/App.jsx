@@ -12,7 +12,6 @@ export default function App() {
             <JobBrowser
                 resumeId={resumeContext.resumeId}
                 resumeName={resumeContext.resumeName}
-                selectedLLM={resumeContext.llm}
                 onBack={() => { setCurrentView('landing'); setResumeContext(null); }}
             />
         );

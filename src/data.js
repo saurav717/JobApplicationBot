@@ -271,11 +271,8 @@ export const userProfile = {
 };
 
 export const llmOptions = [
-    { id: 'claude-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', description: 'Best balance of speed & quality' },
-    { id: 'claude-opus', name: 'Claude 3 Opus', provider: 'Anthropic', description: 'Most capable, slower' },
-    { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', description: 'Fast multimodal model' },
-    { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI', description: 'High capability' },
-    { id: 'gemini-pro', name: 'Gemini 1.5 Pro', provider: 'Google', description: 'Long context window' },
+    { id: 'llama-3.3-70b', name: 'Llama 3.3 70B', provider: 'Groq', description: 'Best quality · used for parsing & profiling' },
+    { id: 'llama3-8b', name: 'Llama 3 8B', provider: 'Groq', description: 'Fastest · used for reranking & form filling' },
 ];
 
 export const continentData = [

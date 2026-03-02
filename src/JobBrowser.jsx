@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import {
-    ChevronRight, ChevronDown, ChevronUp, Check, X, Upload, Sparkles,
+    ChevronDown, ChevronUp, Check, X, Sparkles,
     ArrowRight, Building2, MapPin, Clock, TrendingUp, Filter, Search,
-    User, Mail, Phone, FileText, GraduationCap, Link2, Linkedin, Github,
+    User, Mail, Phone, FileText, Linkedin,
     Bot, CheckCircle2, AlertCircle, Loader2, Globe, Calendar, Cpu,
     SlidersHorizontal, Briefcase, RefreshCw
 } from 'lucide-react';
 import { searchJobsGrouped, generateForm } from './api';
-import { llmOptions, continentData, timeOptions } from './data';
+import { continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
     return (
@@ -24,7 +24,7 @@ function FormField({ label, value, icon: Icon, filled, className = '' }) {
     );
 }
 
-export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialLLM, onBack }) {
+export default function JobBrowser({ resumeId, resumeName, onBack }) {
     // API State
     const [companies, setCompanies] = useState([]);
     const [loadingJobs, setLoadingJobs] = useState(true);
@@ -40,7 +40,6 @@ export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialL
     const [showFilters, setShowFilters] = useState(true);
 
     // Filters & Config
-    const [selectedLLM, setSelectedLLM] = useState(initialLLM || 'claude-sonnet');
     const [selectedContinents, setSelectedContinents] = useState(['north-america']);
     const [selectedCountries, setSelectedCountries] = useState(['usa', 'canada']);
     const [expandedContinents, setExpandedContinents] = useState({});
@@ -65,17 +64,22 @@ export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialL
             // Map backend response { company: [...jobs] } to array format
             const compArray = Object.entries(response).map(([name, jobs], index) => {
                 const totalJobs = jobs.length;
+                const domainName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
                 return {
                     id: name.toLowerCase().replace(/\s+/g, '-'),
                     name,
-                    logo: jobs[0]?.logo_url || `https://logo.clearbit.com/${name.toLowerCase().replace(/\s+/g, '')}.com`,
+                    logo: jobs[0]?.logo_url || `https://logo.clearbit.com/${domainName}.com`,
                     industry: 'Tech',
                     location: jobs[0]?.location || 'Various',
                     openRoles: totalJobs,
-                    selected: index < 5, // auto-select first 5
-                    jobs: jobs
+                    selected: index < 5,
+                    jobs: [...jobs].sort((a, b) => (b.score || 0) - (a.score || 0)),
                 };
-            }).sort((a, b) => b.jobs[0]?.score - a.jobs[0]?.score);
+            }).sort((a, b) => {
+                const bestA = Math.max(...a.jobs.map(j => j.score || 0));
+                const bestB = Math.max(...b.jobs.map(j => j.score || 0));
+                return bestB - bestA;
+            });
 
             setCompanies(compArray);
             if (compArray.length > 0) setSelectedCompany(compArray[0]);
@@ -183,7 +187,6 @@ export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialL
 
     const totalSelected = companies.filter(c => c.selected).length;
     const totalJobs = companies.filter(c => c.selected).reduce((a, c) => a + c.jobs.length, 0);
-    const currentLLM = llmOptions.find(l => l.id === selectedLLM);
 
     return (
         <div className="flex flex-col min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 text-white">
@@ -226,13 +229,14 @@ export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialL
             {showFilters && (
                 <div className="flex-shrink-0 z-20 border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-xl px-6 py-4">
                     <div className="flex items-start gap-6">
-                        {/* LLM Selection */}
+                        {/* AI Stack info */}
                         <div className="flex-shrink-0 w-[220px]">
-                            <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-2"><Cpu className="w-3.5 h-3.5" /> Ranking Model</label>
-                            <select value={selectedLLM} onChange={e => setSelectedLLM(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-700/50 text-sm text-white outline-none focus:border-indigo-500/50 appearance-none cursor-pointer">
-                                {llmOptions.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                            </select>
-                            <p className="text-xs text-slate-500 mt-1">{currentLLM?.description}</p>
+                            <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-2"><Cpu className="w-3.5 h-3.5" /> AI Stack</label>
+                            <div className="px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-700/50 text-sm">
+                                <span className="text-indigo-300 font-medium">Groq</span>
+                                <span className="text-slate-500"> · Llama 3.3 70B</span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">Open-source · reranked by LLM</p>
                         </div>
                         {/* Posted Within */}
                         <div className="flex-shrink-0 w-[160px]">
@@ -377,14 +381,49 @@ export default function JobBrowser({ resumeId, resumeName, selectedLLM: initialL
                                         </div>
                                     </div>
                                     {expandedJobs[job.id] && (
-                                        <div className="px-3 pb-3 border-t border-slate-800/50 pt-2">
-                                            <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
-                                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(job.posted_date || Date.now()).toLocaleDateString()}</span>
-                                            </div>
-                                            <div className="max-h-[300px] overflow-y-auto custom-scrollbar text-xs text-slate-400 whitespace-pre-line bg-slate-800/30 p-3 rounded-lg">
+                                        <div className="px-3 pb-3 border-t border-slate-800/50 pt-2 space-y-2">
+                                            {/* Posted date */}
+                                            {job.posted && (
+                                                <div className="flex items-center gap-1 text-xs text-slate-500">
+                                                    <Clock className="w-3 h-3" />
+                                                    {new Date(job.posted).toLocaleDateString()}
+                                                </div>
+                                            )}
+                                            {/* Match reasons from LLM reranker */}
+                                            {job.match_reasons?.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs text-slate-500 mb-1">Why it matches:</p>
+                                                    <ul className="space-y-0.5">
+                                                        {job.match_reasons.map((r, i) => (
+                                                            <li key={i} className="flex items-start gap-1.5 text-xs text-teal-400">
+                                                                <CheckCircle2 className="w-3 h-3 mt-0.5 flex-shrink-0" />{r}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            {/* Skill matches */}
+                                            {job.skill_matches?.length > 0 && (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {job.skill_matches.map((s, i) => (
+                                                        <span key={i} className="px-1.5 py-0.5 rounded-md text-xs bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">{s}</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {/* Missing skills */}
+                                            {job.missing_skills?.length > 0 && (
+                                                <div className="flex flex-wrap gap-1">
+                                                    <span className="text-xs text-slate-500 mr-1">Gaps:</span>
+                                                    {job.missing_skills.map((s, i) => (
+                                                        <span key={i} className="px-1.5 py-0.5 rounded-md text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20">{s}</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {/* Description */}
+                                            <div className="max-h-[200px] overflow-y-auto custom-scrollbar text-xs text-slate-400 whitespace-pre-line bg-slate-800/30 p-3 rounded-lg">
                                                 {job.description}
                                             </div>
-                                            <div className="flex items-center gap-2 mt-2">
+                                            <div className="flex items-center gap-2">
                                                 <button onClick={() => handleJobClick(job, selectedCompany)} className="flex-1 px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-all duration-300">View Application Form</button>
                                                 <button onClick={(e) => toggleJobSelection(job.id, e)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${selectedJobs[job.id] ? 'bg-teal-500/20 text-teal-400' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'}`}>{selectedJobs[job.id] ? '✓ Selected' : 'Select'}</button>
                                             </div>
