@@ -71,7 +71,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     const refreshJobsMultiPlatform = async () => {
         if (isRefreshing || loadingJobs || !authToken || !authUser) return;
         setIsRefreshing(true);
-        setMultiScrapeStatus({ status: 'running', platforms_active: [], jobs_found: 0, jobs_stored: 0, errors: [] });
+        setMultiScrapeStatus({ status: 'running', platforms_active: ['arbeitnow', 'remotive', 'remoteok', 'jobicy', 'himalayas', 'findwork'], jobs_found: 0, jobs_stored: 0, errors: [] });
         try {
             await triggerMultiPlatformScrape({}, authToken);
             const maxWait = 120000;
@@ -436,25 +436,41 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                             <div className="p-4 text-center text-slate-500 text-sm">No companies found. (Maybe scraping is still running?)</div>
                         )}
 
-                        {filteredCompanies.map(company => (
-                            <button key={company.id} onClick={() => setSelectedCompany(company)} className={`w-full text-left p-3 rounded-xl transition-all duration-300 border ${selectedCompany?.id === company.id ? 'bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border-indigo-500/30' : 'bg-slate-900/30 border-slate-800/50 hover:bg-slate-800/30'}`}>
-                                <div className="flex items-start gap-3">
-                                    <img src={company.logo} alt={company.name} className="w-10 h-10 rounded-xl bg-slate-800 object-contain" />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between">
-                                            <h3 className="font-semibold text-sm text-white truncate">{company.name}</h3>
-                                            <button onClick={(e) => toggleCompanySelection(company.id, e)} className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 transition-all duration-300 ${company.selected ? 'bg-indigo-500 border-indigo-500' : 'border-slate-600 hover:border-slate-500'}`}>
-                                                {company.selected && <Check className="w-3 h-3 text-white" />}
-                                            </button>
-                                        </div>
-                                        <p className="text-xs text-slate-500">{company.industry}</p>
-                                        <div className="flex items-center justify-between mt-1">
-                                            <span className="text-xs text-slate-400">{company.openRoles} roles</span>
+                        {filteredCompanies.map(company => {
+                            const sourcePlatforms = [...new Set(
+                                company.jobs.map(j => j.source_platform).filter(Boolean)
+                            )];
+                            return (
+                                <button key={company.id} onClick={() => setSelectedCompany(company)} className={`w-full text-left p-3 rounded-xl transition-all duration-300 border ${selectedCompany?.id === company.id ? 'bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border-indigo-500/30' : 'bg-slate-900/30 border-slate-800/50 hover:bg-slate-800/30'}`}>
+                                    <div className="flex items-start gap-3">
+                                        <img src={company.logo} alt={company.name} className="w-10 h-10 rounded-xl bg-slate-800 object-contain" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="font-semibold text-sm text-white truncate">{company.name}</h3>
+                                                <button onClick={(e) => toggleCompanySelection(company.id, e)} className={`w-5 h-5 rounded-md border flex items-center justify-center flex-shrink-0 transition-all duration-300 ${company.selected ? 'bg-indigo-500 border-indigo-500' : 'border-slate-600 hover:border-slate-500'}`}>
+                                                    {company.selected && <Check className="w-3 h-3 text-white" />}
+                                                </button>
+                                            </div>
+                                            {sourcePlatforms.length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                                    {sourcePlatforms.slice(0, 3).map(platform => (
+                                                        <SourceBadge key={platform} platform={platform} />
+                                                    ))}
+                                                    {sourcePlatforms.length > 3 && (
+                                                        <span className="px-1.5 py-0.5 rounded-md text-xs bg-slate-700/50 text-slate-400">
+                                                            +{sourcePlatforms.length - 3}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            <div className="flex items-center justify-between mt-1">
+                                                <span className="text-xs text-slate-400">{company.openRoles} roles</span>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </button>
-                        ))}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
