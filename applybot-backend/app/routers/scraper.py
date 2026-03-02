@@ -183,45 +183,67 @@ async def test_platform_connection(platform: str, credentials: Dict):
 # ── Background task ────────────────────────────────────────────────────────
 
 async def _run_multi_platform_task(user_id: str, request: ScrapeRequest) -> None:
-    """Background task: run multi-platform scrape and store results."""
+    """Background task: run multi-platform scrape with free API fallbacks and store results."""
     from app.services.credential_manager import CredentialManager
     from app.services.embeddings import embed_text
     from app.services.scrapers.scraper_orchestrator import ScraperOrchestrator
     from app.services.vector_store import get_all_jobs, store_jobs_batch
+    from app.services.job_scraper import (
+        fetch_arbeitnow, fetch_remotive, fetch_remoteok,
+        fetch_jobicy, fetch_himalayas, fetch_findwork,
+    )
 
     state = _user_scrape_state[user_id]
     orchestrator = ScraperOrchestrator(CredentialManager())
+    all_jobs: List[Dict[str, Any]] = []
 
     try:
-        init_results = await orchestrator.initialize_scrapers(user_id)
-        active_platforms = [p for p, ok in init_results.items() if ok]
-        state["platforms_active"] = active_platforms
-
-        if not active_platforms:
-            state["status"] = "error"
-            state["errors"].append("No platforms could be initialized. Please check your credentials.")
-            state["completed_at"] = datetime.now(timezone.utc).isoformat()
-            return
-
         keywords = request.keywords or ["software engineer", "developer", "data scientist"]
+        keyword_str = " ".join(keywords[:3])
 
-        scraped_jobs = await orchestrator.search_all_platforms(
-            keywords=keywords,
-            location=request.location,
-            remote_only=request.remote_only,
-            posted_within_days=request.posted_within_days,
-            limit_per_platform=request.limit_per_platform,
+        # 1. Try authenticated scrapers if user has credentials
+        try:
+            init_results = await orchestrator.initialize_scrapers(user_id)
+            active_platforms = [p for p, ok in init_results.items() if ok]
+            state["platforms_active"] = active_platforms
+
+            if active_platforms:
+                scraped_jobs = await orchestrator.search_all_platforms(
+                    keywords=keywords,
+                    location=request.location,
+                    remote_only=request.remote_only,
+                    posted_within_days=request.posted_within_days,
+                    limit_per_platform=request.limit_per_platform,
+                )
+                all_jobs.extend([_scraped_to_dict(j) for j in scraped_jobs])
+        except Exception as auth_exc:
+            import logging
+            logging.getLogger(__name__).warning("[MultiScrape] Authenticated scrape failed: %s", auth_exc)
+
+        # 2. Always run free API scrapers as fallback (no credentials required)
+        free_platform_names = ["arbeitnow", "remotive", "remoteok", "jobicy", "himalayas", "findwork"]
+        state["platforms_active"] = list(set(state.get("platforms_active", []) + free_platform_names))
+
+        free_results = await asyncio.gather(
+            fetch_arbeitnow(),
+            fetch_remotive(search=keyword_str),
+            fetch_remoteok(),
+            fetch_jobicy(),
+            fetch_himalayas(),
+            fetch_findwork(search=keyword_str),
+            return_exceptions=True,
         )
+        for result in free_results:
+            if isinstance(result, list):
+                all_jobs.extend(result)
 
-        state["jobs_found"] = len(scraped_jobs)
+        state["jobs_found"] = len(all_jobs)
 
-        if not scraped_jobs:
+        if not all_jobs:
             state["status"] = "complete"
+            state["errors"].append("No jobs found from any source. Try different keywords.")
             state["completed_at"] = datetime.now(timezone.utc).isoformat()
             return
-
-        # Convert ScrapedJob -> dict format expected by vector store
-        job_dicts = [_scraped_to_dict(j) for j in scraped_jobs]
 
         # Deduplicate against already-stored jobs
         existing = get_all_jobs(limit=5000)
@@ -230,8 +252,8 @@ async def _run_multi_platform_task(user_id: str, request: ScrapeRequest) -> None
             for j in existing
         }
         new_jobs = [
-            j for j in job_dicts
-            if (j["title"].lower().strip(), j["company"].lower().strip()) not in existing_keys
+            j for j in all_jobs
+            if (j.get("title", "").lower().strip(), j.get("company", "").lower().strip()) not in existing_keys
         ]
 
         # Embed and store in batches
@@ -240,7 +262,7 @@ async def _run_multi_platform_task(user_id: str, request: ScrapeRequest) -> None
         for i in range(0, len(new_jobs), batch_size):
             batch = new_jobs[i:i + batch_size]
             texts = [
-                f"{j.get('title','')} {j.get('company','')} {j.get('description','')[:300]} {' '.join(j.get('skills_required',[]))}"
+                f"{j.get('title','')} {j.get('company','')} {j.get('description','')[:300]} {' '.join(j.get('skills_required', []))}"
                 for j in batch
             ]
             embed_results = await asyncio.gather(*[embed_text(t) for t in texts], return_exceptions=True)

@@ -248,75 +248,77 @@ export default function LandingPage({ onStart }) {
                         </div>
                     </div>
 
-                    {/* Platform Credentials Section */}
-                    {authToken && (
-                        <div className="mt-4 p-[1px] rounded-2xl bg-gradient-to-r from-indigo-600/30 via-purple-600/30 to-teal-600/30">
-                            <div className="bg-slate-900/90 backdrop-blur-xl rounded-2xl p-5">
-                                <button
-                                    onClick={() => setShowCredentials(!showCredentials)}
-                                    className="w-full flex items-center justify-between text-left"
-                                >
-                                    <div>
-                                        <p className="text-sm font-semibold text-white">Platform Credentials</p>
-                                        <p className="text-xs text-slate-500 mt-0.5">Connect job platforms for broader scraping</p>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <ConnectionStatus platforms={connectedPlatforms} />
-                                        {showCredentials
-                                            ? <ChevronUp className="w-4 h-4 text-slate-400" />
-                                            : <ChevronDown className="w-4 h-4 text-slate-400" />
-                                        }
-                                    </div>
-                                </button>
-                                {/* Quick-connect buttons using the new modal */}
-                                <div className="flex flex-wrap gap-2 mt-3">
-                                    {['linkedin', 'glassdoor', 'indeed', 'jobright', 'workday'].map(p => (
-                                        <button
-                                            key={p}
-                                            onClick={() => setConnectingPlatform(p)}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                                                connectedPlatforms[p]
-                                                    ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
-                                                    : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:text-white hover:border-slate-600'
-                                            }`}
-                                        >
-                                            {connectedPlatforms[p] ? '✓ ' : ''}{p.charAt(0).toUpperCase() + p.slice(1)}
-                                        </button>
-                                    ))}
+                    {/* Platform Connection Section - Always Visible & Prominent */}
+                    <div className="mt-6 p-[1px] rounded-2xl bg-gradient-to-r from-blue-600/50 via-purple-600/50 to-green-600/50">
+                        <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl p-6">
+                            <div className="flex items-start gap-4 mb-4">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 flex items-center justify-center flex-shrink-0">
+                                    <Zap className="w-6 h-6 text-white" />
                                 </div>
-                                {showCredentials && (
-                                    <div className="mt-4">
-                                        <PlatformCredentialsForm
-                                            token={authToken}
-                                            connectedPlatforms={connectedPlatforms}
-                                            onConnect={handlePlatformConnect}
-                                        />
-                                    </div>
-                                )}
+                                <div>
+                                    <h3 className="text-lg font-bold text-white mb-1">Connect Your Job Platforms</h3>
+                                    <p className="text-sm text-slate-400">
+                                        Link your accounts to search jobs from LinkedIn, Glassdoor, Indeed, and company career sites.
+                                        Your credentials are encrypted and only used for job searching.
+                                    </p>
+                                </div>
                             </div>
-                        </div>
-                    )}
 
-                    {!authToken && (
-                        <div className="mt-4 p-3 rounded-xl bg-slate-800/30 border border-slate-700/30 text-center">
-                            <p className="text-xs text-slate-500">
-                                <button
-                                    onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}
-                                    className="text-indigo-400 hover:text-indigo-300 transition-colors"
-                                >
-                                    Create an account
-                                </button>
-                                {' '}or{' '}
-                                <button
-                                    onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
-                                    className="text-indigo-400 hover:text-indigo-300 transition-colors"
-                                >
-                                    sign in
-                                </button>
-                                {' '}to connect LinkedIn, Glassdoor & more
-                            </p>
+                            {!authToken ? (
+                                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+                                    <p className="text-sm text-slate-300 mb-3">
+                                        Create a free account to connect your job platforms and unlock thousands more job listings.
+                                    </p>
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}
+                                            className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/20 transition-all"
+                                        >
+                                            Create Free Account
+                                        </button>
+                                        <button
+                                            onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
+                                            className="px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-700 transition-all"
+                                        >
+                                            Sign In
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+                                        {[
+                                            { id: 'linkedin', name: 'LinkedIn', icon: '🔗' },
+                                            { id: 'glassdoor', name: 'Glassdoor', icon: '🏢' },
+                                            { id: 'indeed', name: 'Indeed', icon: '🔍' },
+                                            { id: 'jobright', name: 'Jobright', icon: '🤖' },
+                                            { id: 'workday', name: 'Workday', icon: '⚙️' },
+                                        ].map(platform => (
+                                            <button
+                                                key={platform.id}
+                                                onClick={() => setConnectingPlatform(platform.id)}
+                                                className={`p-3 rounded-xl border transition-all duration-300 flex flex-col items-center gap-2 ${
+                                                    connectedPlatforms[platform.id]
+                                                        ? 'bg-teal-500/10 border-teal-500/30'
+                                                        : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600 hover:bg-slate-800'
+                                                }`}
+                                            >
+                                                <span className="text-2xl">{platform.icon}</span>
+                                                <span className={`text-xs font-medium ${connectedPlatforms[platform.id] ? 'text-teal-300' : 'text-slate-300'}`}>
+                                                    {connectedPlatforms[platform.id] ? '✓ Connected' : platform.name}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {Object.values(connectedPlatforms).some(v => v) && (
+                                        <p className="text-xs text-teal-400 text-center">
+                                            ✓ {Object.values(connectedPlatforms).filter(v => v).length} platform(s) connected — you'll see more jobs when you refresh
+                                        </p>
+                                    )}
+                                </>
+                            )}
                         </div>
-                    )}
+                    </div>
 
                     {/* Company logos */}
                     <div className="flex items-center justify-center gap-6 mt-6">
