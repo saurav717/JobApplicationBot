@@ -1,5 +1,142 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// ── Auth token helpers ─────────────────────────────────────────────────────
+
+export function getStoredToken() {
+    return localStorage.getItem('applybot_token');
+}
+
+export function setStoredToken(token) {
+    localStorage.setItem('applybot_token', token);
+}
+
+export function clearStoredToken() {
+    localStorage.removeItem('applybot_token');
+    localStorage.removeItem('applybot_user');
+}
+
+export function getStoredUser() {
+    try {
+        return JSON.parse(localStorage.getItem('applybot_user') || 'null');
+    } catch {
+        return null;
+    }
+}
+
+function _authHeaders(token) {
+    const t = token || getStoredToken();
+    return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+// ── User Auth ──────────────────────────────────────────────────────────────
+
+/**
+ * Register a new user. Returns { access_token, user }
+ */
+export async function registerUser(name, email, password) {
+    const res = await fetch(`${BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Registration failed: ${res.status}`);
+    }
+    const data = await res.json();
+    setStoredToken(data.access_token);
+    localStorage.setItem('applybot_user', JSON.stringify(data.user));
+    return data;
+}
+
+/**
+ * Login an existing user. Returns { access_token, user }
+ */
+export async function loginUser(email, password) {
+    const form = new URLSearchParams({ username: email, password });
+    const res = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Login failed: ${res.status}`);
+    }
+    const data = await res.json();
+    setStoredToken(data.access_token);
+    localStorage.setItem('applybot_user', JSON.stringify(data.user));
+    return data;
+}
+
+/**
+ * Store encrypted credentials for a job platform.
+ */
+export async function storePlatformCredential(platform, email, password, workdayUrl, companyName, token) {
+    const res = await fetch(`${BASE_URL}/api/auth/credentials/store`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders(token) },
+        body: JSON.stringify({
+            platform,
+            email,
+            password,
+            workday_url: workdayUrl || null,
+            company_name: companyName || null,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Credential store failed: ${res.status}`);
+    }
+}
+
+/**
+ * Test connectivity for a platform credential.
+ */
+export async function testPlatformConnection(platform, email, password, workdayUrl, token) {
+    const res = await fetch(`${BASE_URL}/api/auth/credentials/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders(token) },
+        body: JSON.stringify({
+            platform,
+            email,
+            password,
+            workday_url: workdayUrl || null,
+        }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Connection test failed: ${res.status}`);
+    }
+    return res.json();
+}
+
+/**
+ * Get credential status (which platforms are connected).
+ */
+export async function getCredentialStatus(token) {
+    const res = await fetch(`${BASE_URL}/api/auth/credentials/status`, {
+        headers: _authHeaders(token),
+    });
+    if (!res.ok) throw new Error(`Credential status failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Delete stored credentials for a platform.
+ */
+export async function deletePlatformCredential(platform, workdayUrl, token) {
+    const url = new URL(`${BASE_URL}/api/auth/credentials/${platform}`);
+    if (workdayUrl) url.searchParams.set('workday_url', workdayUrl);
+    const res = await fetch(url.toString(), {
+        method: 'DELETE',
+        headers: _authHeaders(token),
+    });
+    if (!res.ok) throw new Error(`Delete credential failed: ${res.status}`);
+}
+
+// ── Resume ─────────────────────────────────────────────────────────────────
+
 /**
  * Upload a PDF resume. Returns { id, name, email, skills, ... }
  */
@@ -16,6 +153,8 @@ export async function uploadResume(file) {
     }
     return res.json();
 }
+
+// ── Jobs ───────────────────────────────────────────────────────────────────
 
 /**
  * Search jobs for a resume. Returns SearchResponse { jobs: JobWithScore[], total, resume_id }
@@ -63,6 +202,8 @@ export async function generateForm(jobId, resumeId, customInstructions = null) {
     return res.json();
 }
 
+// ── Scraper ────────────────────────────────────────────────────────────────
+
 /**
  * Manually trigger a generic job scrape.
  */
@@ -82,10 +223,45 @@ export async function triggerResumeTargetedScrape(resumeId) {
 }
 
 /**
- * Get scraper status.
+ * Trigger a multi-platform scrape (requires auth token).
+ */
+export async function triggerMultiPlatformScrape(options, token) {
+    const res = await fetch(`${BASE_URL}/api/scraper/run/multi-platform`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders(token) },
+        body: JSON.stringify(options || {}),
+    });
+    if (!res.ok) throw new Error(`Multi-platform scrape failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Get scraper status (legacy — no auth required).
  */
 export async function getScraperStatus() {
     const res = await fetch(`${BASE_URL}/api/scraper/status`);
     if (!res.ok) throw new Error(`Status failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Get per-user multi-platform scrape status (requires auth).
+ */
+export async function getUserScrapeStatus(userId, token) {
+    const res = await fetch(`${BASE_URL}/api/scraper/status/${userId}`, {
+        headers: _authHeaders(token),
+    });
+    if (!res.ok) throw new Error(`User scrape status failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Get connected platforms for the current user.
+ */
+export async function getPlatformStatus(token) {
+    const res = await fetch(`${BASE_URL}/api/scraper/platforms`, {
+        headers: _authHeaders(token),
+    });
+    if (!res.ok) throw new Error(`Platform status failed: ${res.status}`);
     return res.json();
 }

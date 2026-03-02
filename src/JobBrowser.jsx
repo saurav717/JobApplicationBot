@@ -7,7 +7,10 @@ import {
     SlidersHorizontal, Briefcase, RefreshCw, GraduationCap, DollarSign,
     Shield, RotateCcw
 } from 'lucide-react';
-import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus } from './api';
+import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, triggerMultiPlatformScrape, getUserScrapeStatus, getStoredToken, getStoredUser } from './api';
+import SourceBadge from './components/Jobs/SourceBadge';
+import ScrapeProgressBar from './components/Jobs/ScrapeProgressBar';
+import PlatformFilter from './components/Jobs/PlatformFilter';
 import { continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
@@ -54,9 +57,47 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     const [scraperStatus, setScraperStatus] = useState(null); // { last_run, jobs_scraped }
     const [isRefreshing, setIsRefreshing] = useState(false);
 
+    // Platform filter state
+    const [selectedPlatforms, setSelectedPlatforms] = useState([]);
+    const [multiScrapeStatus, setMultiScrapeStatus] = useState(null);
+
+    // Auth (for multi-platform scrape)
+    const authToken = getStoredToken();
+    const authUser = getStoredUser();
+
+    // Multi-platform refresh (uses stored credentials when available)
+    const refreshJobsMultiPlatform = async () => {
+        if (isRefreshing || loadingJobs || !authToken || !authUser) return;
+        setIsRefreshing(true);
+        setMultiScrapeStatus({ status: 'running', platforms_active: [], jobs_found: 0, jobs_stored: 0, errors: [] });
+        try {
+            await triggerMultiPlatformScrape({}, authToken);
+            const maxWait = 120000;
+            const pollInterval = 5000;
+            let elapsed = 0;
+            while (elapsed < maxWait) {
+                await new Promise(r => setTimeout(r, pollInterval));
+                elapsed += pollInterval;
+                try {
+                    const s = await getUserScrapeStatus(authUser.id, authToken);
+                    setMultiScrapeStatus(s);
+                    if (s.status === 'complete' || s.status === 'error') break;
+                } catch (_) {}
+            }
+        } catch (e) {
+            console.warn('Multi-platform scrape failed:', e);
+        }
+        await loadJobs();
+        setIsRefreshing(false);
+    };
+
     // Refresh: trigger targeted scrape, poll until status updates, then reload jobs
     const refreshJobs = async () => {
         if (isRefreshing || loadingJobs) return;
+        // Use multi-platform scrape if user is authenticated
+        if (authToken && authUser) {
+            return refreshJobsMultiPlatform();
+        }
         setIsRefreshing(true);
         const prevLastRun = scraperStatus?.last_run || 'Never';
         try {
@@ -217,6 +258,10 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     const filteredCompanies = companies.filter(c => {
         if (searchQuery && !c.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
         if (showOnlySelected && !c.selected) return false;
+        if (selectedPlatforms.length > 0) {
+            const hasMatchingJob = c.jobs.some(j => selectedPlatforms.includes(j.source_platform));
+            if (!hasMatchingJob) return false;
+        }
         return true;
     });
 
@@ -259,6 +304,13 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                     </div>
                 </div>
             </header>
+
+            {/* Scrape Progress Bar */}
+            {multiScrapeStatus && multiScrapeStatus.status !== 'idle' && (
+                <div className="flex-shrink-0 px-6 pt-3">
+                    <ScrapeProgressBar status={multiScrapeStatus} />
+                </div>
+            )}
 
             {/* Filter Panel */}
             {showFilters && (
@@ -314,6 +366,14 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                     );
                                 })}
                             </div>
+                        </div>
+                        {/* Platform filter */}
+                        <div className="flex-shrink-0 w-[280px]">
+                            <PlatformFilter
+                                selectedPlatforms={selectedPlatforms}
+                                onChange={setSelectedPlatforms}
+                                availablePlatforms={[...new Set(companies.flatMap(c => c.jobs.map(j => j.source_platform)).filter(Boolean))]}
+                            />
                         </div>
                         {/* Refresh jobs */}
                         <div className="flex-shrink-0 pt-5 space-y-1">
@@ -411,6 +471,10 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                                         <div className="flex items-start justify-between gap-2 mb-1">
                                             <h3 className="font-semibold text-sm text-white leading-tight">{job.title}</h3>
                                             <span className={`flex-shrink-0 px-2 py-0.5 rounded-lg text-xs font-bold bg-gradient-to-r ${getRelevancyClasses(job.score)} text-white`}>{(job.score * 100).toFixed(0)}%</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            {job.source_platform && <SourceBadge platform={job.source_platform} />}
+                                            {job.easy_apply && <span className="px-1.5 py-0.5 rounded-md text-xs bg-teal-500/10 text-teal-400 border border-teal-500/20">Easy Apply</span>}
                                         </div>
                                         <div className="flex items-center gap-1 text-xs text-slate-400 mb-1">
                                             <MapPin className="w-3 h-3" /> {job.location || 'Remote'}
