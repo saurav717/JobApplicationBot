@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, scrapeTopCompanies } from './api';
 import SourceBadge from './components/Jobs/SourceBadge';
-import ScrapeProgressBar from './components/Jobs/ScrapeProgressBar';
 import PlatformFilter from './components/Jobs/PlatformFilter';
 import EmbeddedApplicationForm from './components/Jobs/EmbeddedApplicationForm';
 import ApplyQueue from './components/Jobs/ApplyQueue';
@@ -295,13 +294,6 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                     </div>
                 </div>
             </header>
-
-            {/* Scrape Progress Bar */}
-            {multiScrapeStatus && multiScrapeStatus.status !== 'idle' && (
-                <div className="flex-shrink-0 px-6 pt-3">
-                    <ScrapeProgressBar status={multiScrapeStatus} />
-                </div>
-            )}
 
             {/* Filter Panel */}
             {showFilters && (
