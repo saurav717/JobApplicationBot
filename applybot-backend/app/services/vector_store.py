@@ -4,7 +4,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import (
     VectorParams, Distance, PointStruct,
     Filter, FieldCondition, MatchValue,
-    QueryRequest,
 )
 from app.config import QDRANT_URL, QDRANT_API_KEY, JOBS_COLLECTION, RESUMES_COLLECTION, EMBEDDING_DIM
 
