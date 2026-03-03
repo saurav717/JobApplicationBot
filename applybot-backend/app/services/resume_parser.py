@@ -4,9 +4,9 @@ from pypdf import PdfReader
 from typing import Dict, Any
 
 
-def parse_resume_pdf(file_bytes: bytes) -> Dict[str, Any]:
+def parse_resume_pdf(file_bytes: bytes, llm_provider: str = "groq") -> Dict[str, Any]:
     """
-    Parse a PDF resume and extract structured data using a Groq LLM.
+    Parse a PDF resume and extract structured data using an LLM.
     Falls back to regex heuristics if the LLM call fails.
     Returns a dict with name, email, phone, location, summary, skills, experience, education, raw_text.
     """
@@ -17,7 +17,7 @@ def parse_resume_pdf(file_bytes: bytes) -> Dict[str, Any]:
 
     try:
         from app.services.llm import parse_resume_with_llm
-        parsed = parse_resume_with_llm(raw_text)
+        parsed = parse_resume_with_llm(raw_text, llm_provider=llm_provider)
         parsed["raw_text"] = raw_text
         return parsed
     except Exception as e:

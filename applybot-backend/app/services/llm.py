@@ -1,34 +1,75 @@
 import json
 from typing import List, Dict, Any, Optional
 from groq import Groq
-from app.config import GROQ_API_KEY, GROQ_MODEL, GROQ_PARSE_MODEL
+import anthropic
+from app.config import (
+    GROQ_API_KEY, GROQ_MODEL, GROQ_PARSE_MODEL,
+    ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_PARSE_MODEL,
+)
 
 
-_client = None
+# ── Lazy clients ─────────────────────────────────────────────────────────────
+
+_groq_client = None
+_anthropic_client = None
 
 
-def get_client() -> Groq:
-    global _client
-    if _client is None:
-        _client = Groq(api_key=GROQ_API_KEY)
-    return _client
+def _get_groq() -> Groq:
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
 
+
+def _get_anthropic() -> anthropic.Anthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
+
+
+# ── Unified LLM call ─────────────────────────────────────────────────────────
+
+def _call_llm(prompt: str, use_smart_model: bool, llm_provider: str, max_tokens: int = 2000, temperature: float = 0.1) -> str:
+    """Call the selected LLM provider and return the response text."""
+    if llm_provider == "claude":
+        model = CLAUDE_PARSE_MODEL if use_smart_model else CLAUDE_MODEL
+        client = _get_anthropic()
+        message = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text.strip()
+    else:
+        model = GROQ_PARSE_MODEL if use_smart_model else GROQ_MODEL
+        client = _get_groq()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content.strip()
+
+
+# ── Public functions ──────────────────────────────────────────────────────────
 
 def rerank_jobs(
     resume_text: str,
     jobs: List[Dict[str, Any]],
     limit: int = 20,
     search_profile: Optional[Dict[str, Any]] = None,
+    llm_provider: str = "groq",
 ) -> List[Dict[str, Any]]:
     """
-    Use Groq LLM to re-rank jobs by relevance to the resume.
+    Use LLM to re-rank jobs by relevance to the resume.
     Optionally uses a search_profile for richer context (target titles, industries, seniority).
     Returns enriched job dicts with relevancy_score, match_reasons, skill_matches, missing_skills.
     """
     if not jobs:
         return []
-
-    client = get_client()
 
     job_summaries = []
     for i, job in enumerate(jobs[:30]):  # cap at 30 for token budget
@@ -74,14 +115,7 @@ Respond ONLY with a JSON array like:
 Include ALL {len(job_summaries)} jobs. Sort by score descending."""
 
     try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=2000,
-        )
-        content = response.choices[0].message.content.strip()
-        # Extract JSON array from response
+        content = _call_llm(prompt, use_smart_model=False, llm_provider=llm_provider, max_tokens=2000, temperature=0.1)
         start = content.find("[")
         end = content.rfind("]") + 1
         if start == -1 or end == 0:
@@ -105,15 +139,13 @@ Include ALL {len(job_summaries)} jobs. Sort by score descending."""
     return result[:limit]
 
 
-def generate_job_search_profile(resume_data: Dict[str, Any]) -> Dict[str, Any]:
+def generate_job_search_profile(resume_data: Dict[str, Any], llm_provider: str = "groq") -> Dict[str, Any]:
     """
     Holistically understand the resume and generate a targeted job search profile.
     The LLM figures out what this person does, what roles suit them, and what to prioritize.
     Returns a dict with candidate_summary, target_titles, target_industries, seniority,
     search_keywords, search_query, preferred_remote, key_strengths.
     """
-    client = get_client()
-
     experience_text = "\n".join(
         exp.get("raw", "") for exp in resume_data.get("experience", [])[:5]
     )
@@ -156,13 +188,7 @@ Rules:
 - Do NOT invent skills or experience not present in the resume"""
 
     try:
-        response = client.chat.completions.create(
-            model=GROQ_PARSE_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=1000,
-        )
-        content = response.choices[0].message.content.strip()
+        content = _call_llm(prompt, use_smart_model=True, llm_provider=llm_provider, max_tokens=1000, temperature=0.1)
         start = content.find("{")
         end = content.rfind("}") + 1
         if start == -1 or end == 0:
@@ -182,13 +208,11 @@ Rules:
         }
 
 
-def parse_resume_with_llm(raw_text: str) -> Dict[str, Any]:
+def parse_resume_with_llm(raw_text: str, llm_provider: str = "groq") -> Dict[str, Any]:
     """
-    Use Groq LLM to extract structured fields from raw resume text.
+    Use LLM to extract structured fields from raw resume text.
     Returns a dict with name, email, phone, location, summary, skills, experience, education.
     """
-    client = get_client()
-
     prompt = f"""You are an expert resume parser. Extract structured information from the resume text below.
 
 RESUME TEXT:
@@ -220,13 +244,7 @@ Rules:
 - Include up to 4 education entries
 - Do NOT invent or infer anything not present in the resume text"""
 
-    response = client.chat.completions.create(
-        model=GROQ_PARSE_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-        max_tokens=2000,
-    )
-    content = response.choices[0].message.content.strip()
+    content = _call_llm(prompt, use_smart_model=True, llm_provider=llm_provider, max_tokens=2000, temperature=0.0)
     start = content.find("{")
     end = content.rfind("}") + 1
     if start == -1 or end == 0:
@@ -237,14 +255,13 @@ Rules:
 async def generate_form_values(
     job: Dict[str, Any],
     resume: Dict[str, Any],
-    custom_instructions: Optional[str] = None
+    custom_instructions: Optional[str] = None,
+    llm_provider: str = "groq",
 ) -> Dict[str, Any]:
     """
-    Use Groq to generate tailored application form field values.
+    Use LLM to generate tailored application form field values.
     Returns a dict of field_name -> value.
     """
-    client = get_client()
-
     experience_text = "\n".join(
         exp.get("raw", "") for exp in resume.get("experience", [])[:3]
     )
@@ -308,13 +325,7 @@ Respond ONLY with JSON:
 }}"""
 
     try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=1500,
-        )
-        content = response.choices[0].message.content.strip()
+        content = _call_llm(prompt, use_smart_model=False, llm_provider=llm_provider, max_tokens=1500, temperature=0.3)
         start = content.find("{")
         end = content.rfind("}") + 1
         if start == -1 or end == 0:
@@ -322,7 +333,6 @@ Respond ONLY with JSON:
         return json.loads(content[start:end])
     except Exception as e:
         print(f"[LLM form fill error] {e}")
-        # Fallback: populate from resume data
         name_parts = (resume.get("name") or "").split(" ", 1)
         return {
             "first_name": name_parts[0] if name_parts else "",
