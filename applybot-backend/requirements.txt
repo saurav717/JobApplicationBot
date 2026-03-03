@@ -33,5 +33,3 @@ cryptography==41.0.0
 # Rate limiting
 slowapi==0.1.9
 
-# Proxy rotation (optional)
-rotating-proxies==0.1.0
