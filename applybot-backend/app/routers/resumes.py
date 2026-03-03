@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
 from app.models.schemas import Resume, ResumeUpdate
 from app.services.resume_parser import parse_resume_pdf
 from app.services.vector_store import store_resume, get_resume
@@ -11,10 +11,10 @@ from app.services.job_scraper import run_resume_targeted_scrape
 router = APIRouter()
 
 
-async def _build_profile_and_scrape(resume_id: str, parsed: dict) -> None:
+async def _build_profile_and_scrape(resume_id: str, parsed: dict, llm_provider: str = "groq") -> None:
     """Background task: generate job search profile then run a targeted scrape."""
     try:
-        profile = generate_job_search_profile(parsed)
+        profile = generate_job_search_profile(parsed, llm_provider=llm_provider)
         print(f"[Resume] Job search profile generated: {profile.get('target_titles', [])}")
     except Exception as e:
         print(f"[Resume] Profile generation failed: {e}")
@@ -45,14 +45,18 @@ async def _build_profile_and_scrape(resume_id: str, parsed: dict) -> None:
 
 
 @router.post("/upload", response_model=Resume)
-async def upload_resume(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+async def upload_resume(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    llm_provider: str = Form("groq"),
+):
     """Upload a PDF resume. Parses, stores, then generates a job search profile
     and runs a targeted job scrape in the background."""
     if not file.filename.endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are supported")
 
     file_bytes = await file.read()
-    parsed = parse_resume_pdf(file_bytes)
+    parsed = parse_resume_pdf(file_bytes, llm_provider=llm_provider)
 
     resume_id = str(uuid.uuid4())
     parsed["id"] = resume_id
@@ -70,9 +74,9 @@ async def upload_resume(file: UploadFile = File(...), background_tasks: Backgrou
     # Generate search profile + targeted scrape in the background so the upload
     # returns immediately to the user
     if background_tasks is not None:
-        background_tasks.add_task(_build_profile_and_scrape, resume_id, dict(parsed))
+        background_tasks.add_task(_build_profile_and_scrape, resume_id, dict(parsed), llm_provider)
     else:
-        asyncio.create_task(_build_profile_and_scrape(resume_id, dict(parsed)))
+        asyncio.create_task(_build_profile_and_scrape(resume_id, dict(parsed), llm_provider))
 
     return Resume(**parsed)
 

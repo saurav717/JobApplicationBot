@@ -13,7 +13,7 @@ export default function LandingPage({ onStart }) {
     const [uploading, setUploading] = useState(false);
     const [uploadError, setUploadError] = useState('');
     const [resumeData, setResumeData] = useState(null);
-    const [selectedLLM] = useState('llama-3.3-70b');
+    const [selectedProvider, setSelectedProvider] = useState('groq'); // 'groq' | 'claude'
     const fileInputRef = useRef(null);
 
     // Auth state
@@ -70,7 +70,7 @@ export default function LandingPage({ onStart }) {
         setUploading(true);
         setResumeData(null);
         try {
-            const data = await uploadResume(selectedFile);
+            const data = await uploadResume(selectedFile, selectedProvider);
             setResumeData(data);
         } catch (err) {
             setUploadError(err.message || 'Upload failed. Please try again.');
@@ -89,7 +89,7 @@ export default function LandingPage({ onStart }) {
 
     const handleStart = () => {
         if (!resumeData) return;
-        onStart({ resumeId: resumeData.id, resumeName: resumeData.name, llm: selectedLLM });
+        onStart({ resumeId: resumeData.id, resumeName: resumeData.name, llmProvider: selectedProvider });
     };
 
     return (
@@ -216,15 +216,50 @@ export default function LandingPage({ onStart }) {
                                 <p className="mt-3 text-sm text-red-400 text-center">{uploadError}</p>
                             )}
 
-                            {/* Powered-by badge */}
-                            <div className="mt-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                                <span className="text-xs text-slate-400">Powered by</span>
-                                <span className="text-xs font-semibold text-indigo-300">Groq</span>
-                                <span className="text-slate-600">·</span>
-                                <span className="text-xs text-slate-400">Llama 3.3 70B</span>
-                                <span className="text-slate-600">·</span>
-                                <span className="text-xs text-slate-400">BAAI/bge embeddings</span>
-                                <span className="ml-auto text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Open Source</span>
+                            {/* LLM Provider Selector */}
+                            <div className="mt-5">
+                                <p className="text-xs text-slate-500 mb-2">AI Provider</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={() => setSelectedProvider('groq')}
+                                        className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-left transition-all duration-200 ${
+                                            selectedProvider === 'groq'
+                                                ? 'bg-indigo-500/10 border-indigo-500/50 text-white'
+                                                : 'bg-slate-800/50 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                                        }`}
+                                    >
+                                        <span className="text-base">⚡</span>
+                                        <div>
+                                            <p className="text-xs font-semibold leading-none mb-0.5">Groq</p>
+                                            <p className="text-xs text-slate-500 leading-none">Llama 3.3 70B</p>
+                                        </div>
+                                        {selectedProvider === 'groq' && (
+                                            <span className="ml-auto text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">Selected</span>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={() => setSelectedProvider('claude')}
+                                        className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-left transition-all duration-200 ${
+                                            selectedProvider === 'claude'
+                                                ? 'bg-orange-500/10 border-orange-500/50 text-white'
+                                                : 'bg-slate-800/50 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                                        }`}
+                                    >
+                                        <span className="text-base">🤖</span>
+                                        <div>
+                                            <p className="text-xs font-semibold leading-none mb-0.5">Claude</p>
+                                            <p className="text-xs text-slate-500 leading-none">Sonnet · Haiku</p>
+                                        </div>
+                                        {selectedProvider === 'claude' && (
+                                            <span className="ml-auto text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300">Selected</span>
+                                        )}
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-600 mt-1.5 text-center">
+                                    {selectedProvider === 'groq'
+                                        ? 'Open source · Llama 3.3 70B for parsing · BAAI/bge embeddings'
+                                        : 'Claude Sonnet for parsing · Haiku for matching · Set ANTHROPIC_API_KEY'}
+                                </p>
                             </div>
 
                             {/* CTA Button */}

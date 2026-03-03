@@ -4,7 +4,7 @@ import JobBrowser from './JobBrowser';
 
 export default function App() {
     const [currentView, setCurrentView] = useState('landing');
-    // resumeContext: { resumeId, resumeName, llm }
+    // resumeContext: { resumeId, resumeName, llmProvider }
     const [resumeContext, setResumeContext] = useState(null);
 
     if (currentView === 'browser' && resumeContext) {
@@ -12,6 +12,7 @@ export default function App() {
             <JobBrowser
                 resumeId={resumeContext.resumeId}
                 resumeName={resumeContext.resumeName}
+                llmProvider={resumeContext.llmProvider || 'groq'}
                 onBack={() => { setCurrentView('landing'); setResumeContext(null); }}
             />
         );

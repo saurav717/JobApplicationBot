@@ -84,6 +84,7 @@ async def search_jobs(request: SearchRequest):
         limit=request.limit,
         filters=filters,
         use_llm_rerank=request.use_llm_rerank,
+        llm_provider=request.llm_provider,
     )
 
     jobs_with_scores = [
@@ -116,6 +117,7 @@ async def search_jobs_grouped(request: SearchRequest):
         limit=request.limit,
         filters=filters,
         use_llm_rerank=request.use_llm_rerank,
+        llm_provider=request.llm_provider,
     )
 
     # Build flat { company_name: [jobs] } — exactly what JobBrowser.jsx expects

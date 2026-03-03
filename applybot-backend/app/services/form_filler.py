@@ -7,7 +7,8 @@ from app.services.llm import generate_form_values
 async def generate_application_form(
     job_id: str,
     resume_id: str,
-    custom_instructions: Optional[str] = None
+    custom_instructions: Optional[str] = None,
+    llm_provider: str = "groq",
 ) -> ApplicationForm:
     """
     Build a completely filled ApplicationForm for a job + resume pair.
@@ -20,7 +21,7 @@ async def generate_application_form(
     if not resume:
         raise ValueError(f"Resume {resume_id} not found")
 
-    fields = await generate_form_values(job, resume, custom_instructions)
+    fields = await generate_form_values(job, resume, custom_instructions, llm_provider=llm_provider)
 
     # Parse name into parts
     first_name = fields.get("first_name", "") or (resume.get("name", "").split(" ", 1)[0] if resume.get("name") else "")

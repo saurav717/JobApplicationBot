@@ -148,9 +148,10 @@ export async function deletePlatformCredential(platform, workdayUrl, token) {
 /**
  * Upload a PDF resume. Returns { id, name, email, skills, ... }
  */
-export async function uploadResume(file) {
+export async function uploadResume(file, llmProvider = 'groq') {
     const form = new FormData();
     form.append('file', file);
+    form.append('llm_provider', llmProvider);
     const res = await fetch(`${BASE_URL}/api/resumes/upload`, {
         method: 'POST',
         body: form,
@@ -167,8 +168,8 @@ export async function uploadResume(file) {
 /**
  * Search jobs for a resume. Returns SearchResponse { jobs: JobWithScore[], total, resume_id }
  */
-export async function searchJobs(resumeId, { limit = 50, useLlmRerank = false, filters = null } = {}) {
-    const body = { resume_id: resumeId, limit, use_llm_rerank: useLlmRerank };
+export async function searchJobs(resumeId, { limit = 50, useLlmRerank = false, filters = null, llmProvider = 'groq' } = {}) {
+    const body = { resume_id: resumeId, limit, use_llm_rerank: useLlmRerank, llm_provider: llmProvider };
     if (filters) body.filters = filters;
     const res = await fetch(`${BASE_URL}/api/jobs/search`, {
         method: 'POST',
@@ -182,8 +183,8 @@ export async function searchJobs(resumeId, { limit = 50, useLlmRerank = false, f
 /**
  * Search jobs grouped by company.
  */
-export async function searchJobsGrouped(resumeId, { limit = 100, useLlmRerank = false } = {}) {
-    const body = { resume_id: resumeId, limit, use_llm_rerank: useLlmRerank };
+export async function searchJobsGrouped(resumeId, { limit = 100, useLlmRerank = false, llmProvider = 'groq' } = {}) {
+    const body = { resume_id: resumeId, limit, use_llm_rerank: useLlmRerank, llm_provider: llmProvider };
     const res = await fetch(`${BASE_URL}/api/jobs/search/grouped`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -196,7 +197,7 @@ export async function searchJobsGrouped(resumeId, { limit = 100, useLlmRerank = 
 /**
  * Generate a filled application form.
  */
-export async function generateForm(jobId, resumeId, customInstructions = null) {
+export async function generateForm(jobId, resumeId, customInstructions = null, llmProvider = 'groq') {
     const res = await fetch(`${BASE_URL}/api/applications/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,6 +205,7 @@ export async function generateForm(jobId, resumeId, customInstructions = null) {
             job_id: jobId,
             resume_id: resumeId,
             custom_instructions: customInstructions,
+            llm_provider: llmProvider,
         }),
     });
     if (!res.ok) throw new Error(`Form generation failed: ${res.status}`);

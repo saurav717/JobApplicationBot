@@ -75,6 +75,7 @@ class SearchRequest(BaseModel):
     limit: int = 20
     filters: Optional[SearchFilters] = None
     use_llm_rerank: bool = False
+    llm_provider: str = "groq"
 
 
 class SearchResponse(BaseModel):
@@ -89,6 +90,7 @@ class GenerateFormRequest(BaseModel):
     job_id: str
     resume_id: str
     custom_instructions: Optional[str] = None
+    llm_provider: str = "groq"
 
 
 class ApplicationFormField(BaseModel):

@@ -8,7 +8,8 @@ def match_jobs_to_resume(
     resume_id: str,
     limit: int = 20,
     filters: Optional[Dict[str, Any]] = None,
-    use_llm_rerank: bool = False
+    use_llm_rerank: bool = False,
+    llm_provider: str = "groq",
 ) -> List[Dict[str, Any]]:
     """
     Find the best matching jobs for a given resume.
@@ -52,6 +53,7 @@ def match_jobs_to_resume(
             matched,
             limit=limit,
             search_profile=search_profile,
+            llm_provider=llm_provider,
         )
     else:
         for job in matched:

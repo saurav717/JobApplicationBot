@@ -13,6 +13,7 @@ async def generate_form(request: GenerateFormRequest):
             job_id=request.job_id,
             resume_id=request.resume_id,
             custom_instructions=request.custom_instructions,
+            llm_provider=request.llm_provider,
         )
         return form
     except ValueError as e:

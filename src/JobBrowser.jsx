@@ -29,7 +29,7 @@ function FormField({ label, value, icon: Icon, filled, className = '' }) {
     );
 }
 
-export default function JobBrowser({ resumeId, resumeName, onBack }) {
+export default function JobBrowser({ resumeId, resumeName, llmProvider = 'groq', onBack }) {
     // API State
     const [companies, setCompanies] = useState([]);
     const [loadingJobs, setLoadingJobs] = useState(true);
@@ -118,7 +118,8 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
             // For now, we search with/without LLM reranking based strictly on our backend schema.
             const response = await searchJobsGrouped(resumeId, {
                 limit: 100,
-                useLlmRerank: true // Force LLM rerank via Groq
+                useLlmRerank: true,
+                llmProvider,
             });
             // Map backend response { company: [...jobs] } to array format
             const compArray = Object.entries(response).map(([name, jobs], index) => {
@@ -186,7 +187,7 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
         setShowEmbedded(false);
         try {
             // Call actual AI generation endpoint
-            const formRes = await generateForm(job.id, resumeId);
+            const formRes = await generateForm(job.id, resumeId, null, llmProvider);
             setFormData(formRes);
             setFillingStatus('complete');
         } catch (err) {

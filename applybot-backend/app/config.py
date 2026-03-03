@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 QDRANT_URL = os.getenv("QDRANT_URL", "")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "")
@@ -23,6 +24,10 @@ HF_ROUTER_BASE = "https://router.huggingface.co/hf-inference/models"
 # Groq LLM models
 GROQ_MODEL = "llama3-8b-8192"           # reranking & form filling
 GROQ_PARSE_MODEL = "llama-3.3-70b-versatile"  # resume parsing (higher accuracy)
+
+# Claude (Anthropic) models
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"   # fast tasks: reranking & form filling
+CLAUDE_PARSE_MODEL = "claude-sonnet-4-6"     # smart tasks: resume parsing & job profile
 
 # Database (PostgreSQL for production, SQLite for local dev)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./applybot.db")
