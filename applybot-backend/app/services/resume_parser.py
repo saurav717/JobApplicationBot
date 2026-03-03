@@ -1,5 +1,6 @@
+import io
 import re
-import fitz  # PyMuPDF
+from pypdf import PdfReader
 from typing import Dict, Any
 
 
@@ -9,11 +10,10 @@ def parse_resume_pdf(file_bytes: bytes) -> Dict[str, Any]:
     Falls back to regex heuristics if the LLM call fails.
     Returns a dict with name, email, phone, location, summary, skills, experience, education, raw_text.
     """
-    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    reader = PdfReader(io.BytesIO(file_bytes))
     raw_text = ""
-    for page in doc:
-        raw_text += page.get_text()
-    doc.close()
+    for page in reader.pages:
+        raw_text += page.extract_text() or ""
 
     try:
         from app.services.llm import parse_resume_with_llm
