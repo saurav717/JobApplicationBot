@@ -7,11 +7,11 @@ import {
     SlidersHorizontal, Briefcase, RefreshCw, GraduationCap, DollarSign,
     Shield, RotateCcw
 } from 'lucide-react';
-import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, triggerMultiPlatformScrape, getUserScrapeStatus, getStoredToken, getStoredUser } from './api';
+import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, scrapeTopCompanies } from './api';
 import SourceBadge from './components/Jobs/SourceBadge';
-import ScrapeProgressBar from './components/Jobs/ScrapeProgressBar';
 import PlatformFilter from './components/Jobs/PlatformFilter';
 import EmbeddedApplicationForm from './components/Jobs/EmbeddedApplicationForm';
+import ApplyQueue from './components/Jobs/ApplyQueue';
 import { continentData, timeOptions } from './data';
 
 function FormField({ label, value, icon: Icon, filled, className = '' }) {
@@ -58,48 +58,14 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
     // Scraper status
     const [scraperStatus, setScraperStatus] = useState(null); // { last_run, jobs_scraped }
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isScrapingTopCompanies, setIsScrapingTopCompanies] = useState(false);
 
     // Platform filter state
     const [selectedPlatforms, setSelectedPlatforms] = useState([]);
-    const [multiScrapeStatus, setMultiScrapeStatus] = useState(null);
-
-    // Auth (for multi-platform scrape)
-    const authToken = getStoredToken();
-    const authUser = getStoredUser();
-
-    // Multi-platform refresh (uses stored credentials when available)
-    const refreshJobsMultiPlatform = async () => {
-        if (isRefreshing || loadingJobs || !authToken || !authUser) return;
-        setIsRefreshing(true);
-        setMultiScrapeStatus({ status: 'running', platforms_active: ['arbeitnow', 'remotive', 'remoteok', 'jobicy', 'himalayas', 'findwork'], jobs_found: 0, jobs_stored: 0, errors: [] });
-        try {
-            await triggerMultiPlatformScrape({}, authToken);
-            const maxWait = 120000;
-            const pollInterval = 5000;
-            let elapsed = 0;
-            while (elapsed < maxWait) {
-                await new Promise(r => setTimeout(r, pollInterval));
-                elapsed += pollInterval;
-                try {
-                    const s = await getUserScrapeStatus(authUser.id, authToken);
-                    setMultiScrapeStatus(s);
-                    if (s.status === 'complete' || s.status === 'error') break;
-                } catch (_) {}
-            }
-        } catch (e) {
-            console.warn('Multi-platform scrape failed:', e);
-        }
-        await loadJobs();
-        setIsRefreshing(false);
-    };
 
     // Refresh: trigger targeted scrape, poll until status updates, then reload jobs
     const refreshJobs = async () => {
         if (isRefreshing || loadingJobs) return;
-        // Use multi-platform scrape if user is authenticated
-        if (authToken && authUser) {
-            return refreshJobsMultiPlatform();
-        }
         setIsRefreshing(true);
         const prevLastRun = scraperStatus?.last_run || 'Never';
         try {
@@ -124,6 +90,22 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
         }
         await loadJobs();
         setIsRefreshing(false);
+    };
+
+    // Scrape top 50+ companies via their public Workday portals
+    const handleScrapeTopCompanies = async () => {
+        if (isScrapingTopCompanies) return;
+        setIsScrapingTopCompanies(true);
+        try {
+            await scrapeTopCompanies();
+            // Wait for background scrape to make progress, then reload
+            await new Promise(r => setTimeout(r, 5000));
+            await loadJobs();
+        } catch (err) {
+            console.error('Failed to scrape top companies:', err);
+        } finally {
+            setIsScrapingTopCompanies(false);
+        }
     };
 
     // Initial Load & Rescore
@@ -313,13 +295,6 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                 </div>
             </header>
 
-            {/* Scrape Progress Bar */}
-            {multiScrapeStatus && multiScrapeStatus.status !== 'idle' && (
-                <div className="flex-shrink-0 px-6 pt-3">
-                    <ScrapeProgressBar status={multiScrapeStatus} />
-                </div>
-            )}
-
             {/* Filter Panel */}
             {showFilters && (
                 <div className="flex-shrink-0 z-20 border-b border-slate-800/50 bg-slate-900/50 backdrop-blur-xl px-6 py-4">
@@ -385,16 +360,28 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                         </div>
                         {/* Refresh jobs */}
                         <div className="flex-shrink-0 pt-5 space-y-1">
-                            <button
-                                onClick={refreshJobs}
-                                disabled={isRefreshing || loadingJobs}
-                                className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50"
-                            >
-                                {isRefreshing
-                                    ? <><RotateCcw className="w-4 h-4 animate-spin" /> Fetching…</>
-                                    : <><RefreshCw className="w-4 h-4" /> Refresh Jobs</>
-                                }
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={refreshJobs}
+                                    disabled={isRefreshing || loadingJobs}
+                                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 transition-all duration-300 disabled:opacity-50"
+                                >
+                                    {isRefreshing
+                                        ? <><RotateCcw className="w-4 h-4 animate-spin" /> Fetching…</>
+                                        : <><RefreshCw className="w-4 h-4" /> Refresh Jobs</>
+                                    }
+                                </button>
+                                <button
+                                    onClick={handleScrapeTopCompanies}
+                                    disabled={isScrapingTopCompanies || isRefreshing}
+                                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-amber-500/20 transition-all duration-300 disabled:opacity-50"
+                                >
+                                    {isScrapingTopCompanies
+                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Scraping 50+ Companies…</>
+                                        : <><Building2 className="w-4 h-4" /> Scrape Top Companies</>
+                                    }
+                                </button>
+                            </div>
                             {scraperStatus?.last_run && scraperStatus.last_run !== 'Never' && (
                                 <p className="text-xs text-slate-500">
                                     Updated {new Date(scraperStatus.last_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -734,6 +721,17 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
                     </div>
                 ))}
             </div>
+
+            <ApplyQueue
+                selectedJobs={selectedJobs}
+                companies={companies}
+                onRemoveJob={(job) => {
+                    const key = jobKey(job);
+                    setSelectedJobs(prev => ({ ...prev, [key]: false }));
+                }}
+                onClearQueue={() => setSelectedJobs({})}
+                jobKeyFn={jobKey}
+            />
         </div>
     );
 }

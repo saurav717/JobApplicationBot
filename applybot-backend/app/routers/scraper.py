@@ -9,11 +9,11 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
 from pydantic import BaseModel
 
-from app.routers.auth import get_current_user
 from app.services.job_scraper import run_scrape, run_resume_targeted_scrape, get_status
+from app.services.scrapers.workday_scraper import WorkdayDiscovery
 
 router = APIRouter()
 
@@ -78,14 +78,13 @@ async def scraper_status():
 async def trigger_multi_platform_scrape(
     request: ScrapeRequest,
     background_tasks: BackgroundTasks,
-    current_user: Dict = Depends(get_current_user),
 ):
     """
-    Trigger a multi-platform scrape using the user's stored credentials.
+    Trigger a multi-platform scrape using all available free job APIs.
     Returns immediately; scraping runs in the background.
-    Poll /status/{user_id} for progress.
+    Poll /status/global for progress.
     """
-    user_id = current_user["user_id"]
+    user_id = "global"
     _user_scrape_state[user_id] = {
         "status": "running",
         "platforms_active": [],
@@ -98,7 +97,7 @@ async def trigger_multi_platform_scrape(
     background_tasks.add_task(_run_multi_platform_task, user_id, request)
     return {
         "message": "Multi-platform scrape started",
-        "status_url": f"/api/scraper/status/{user_id}",
+        "status_url": "/api/scraper/status/global",
     }
 
 
@@ -106,7 +105,6 @@ async def trigger_multi_platform_scrape(
 async def trigger_resume_multi_platform_scrape(
     resume_id: str,
     background_tasks: BackgroundTasks,
-    current_user: Dict = Depends(get_current_user),
 ):
     """
     Trigger a multi-platform scrape using keywords derived from the resume.
@@ -116,7 +114,7 @@ async def trigger_resume_multi_platform_scrape(
     search_profile = resume.get("search_profile") if resume else None
     keywords = search_profile.get("search_keywords", [])[:5] if search_profile else []
 
-    user_id = current_user["user_id"]
+    user_id = "global"
     request = ScrapeRequest(keywords=keywords or None)
     _user_scrape_state[user_id] = {
         "status": "running",
@@ -132,18 +130,13 @@ async def trigger_resume_multi_platform_scrape(
         "message": "Resume-targeted multi-platform scrape started",
         "resume_id": resume_id,
         "keywords_used": keywords,
-        "status_url": f"/api/scraper/status/{user_id}",
+        "status_url": "/api/scraper/status/global",
     }
 
 
 @router.get("/status/{user_id}", response_model=ScrapeStatus)
-async def get_user_scrape_status(
-    user_id: str,
-    current_user: Dict = Depends(get_current_user),
-):
-    """Get current multi-platform scrape status for a user."""
-    if current_user["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+async def get_user_scrape_status(user_id: str):
+    """Get current multi-platform scrape status."""
     state = _user_scrape_state.get(user_id, {
         "status": "idle",
         "platforms_active": [],
@@ -157,14 +150,18 @@ async def get_user_scrape_status(
 
 
 @router.get("/platforms")
-async def get_platform_status(current_user: Dict = Depends(get_current_user)):
-    """
-    Get which platforms are connected for the current user,
-    including last scrape time and job counts.
-    """
-    from app.services.credential_manager import CredentialManager
-    cm = CredentialManager()
-    return cm.get_credential_status(current_user["user_id"])
+async def get_platform_status():
+    """List available job platforms (free public sources)."""
+    return {
+        "arbeitnow": {"name": "Arbeitnow", "connected": True},
+        "remotive": {"name": "Remotive", "connected": True},
+        "remoteok": {"name": "RemoteOK", "connected": True},
+        "jobicy": {"name": "Jobicy", "connected": True},
+        "himalayas": {"name": "Himalayas", "connected": True},
+        "findwork": {"name": "Findwork", "connected": True},
+        "lever": {"name": "Lever (public)", "connected": True},
+        "greenhouse": {"name": "Greenhouse (public)", "connected": True},
+    }
 
 
 @router.post("/test-connection")
@@ -178,6 +175,130 @@ async def test_platform_connection(platform: str, credentials: Dict):
         workday_url=credentials.get("workday_url"),
     )
     return result
+
+
+# ── Top Companies (public Workday scraping) ────────────────────────────────
+
+@router.get("/top-companies")
+async def list_top_companies():
+    """
+    List all known top tech companies that we can scrape jobs from.
+    No authentication required - these are public job listings.
+    """
+    companies = [
+        {
+            "company": t["company"],
+            "url": f"https://{t['url']}",
+            "ats": "workday",
+        }
+        for t in WorkdayDiscovery.KNOWN_TENANTS
+    ]
+    return {"companies": companies, "count": len(companies)}
+
+
+@router.post("/scrape-top-companies")
+async def scrape_top_companies(
+    keywords: List[str] = Body(default=["software engineer", "data scientist"]),
+    limit_per_company: int = Body(default=10, ge=1, le=50),
+    companies: Optional[List[str]] = Body(default=None),
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Scrape jobs from 50+ top tech companies using their public Workday portals.
+    No authentication required - these are public job listings.
+
+    Args:
+        keywords: Search terms (default: software engineer, data scientist)
+        limit_per_company: Max jobs per company (default: 10)
+        companies: Optional filter to specific company names
+    """
+    tenants = WorkdayDiscovery.KNOWN_TENANTS
+    if companies:
+        filter_lower = {c.lower() for c in companies}
+        tenants = [t for t in tenants if t["company"].lower() in filter_lower]
+
+    target_count = len(tenants)
+
+    if background_tasks:
+        background_tasks.add_task(
+            _scrape_top_companies_task,
+            keywords,
+            limit_per_company,
+            companies,
+        )
+        return {
+            "message": f"Scraping {target_count} companies in background",
+            "companies": [t["company"] for t in tenants],
+        }
+    else:
+        jobs = await _scrape_top_companies_sync(keywords, limit_per_company, companies)
+        return {"jobs": jobs, "count": len(jobs)}
+
+
+async def _scrape_top_companies_sync(
+    keywords: List[str],
+    limit_per_company: int,
+    company_filter: Optional[List[str]],
+) -> List[Dict[str, Any]]:
+    """Run Workday scrape synchronously and return plain dicts."""
+    scraped = await WorkdayDiscovery.scrape_all_known_companies(
+        keywords=keywords,
+        limit_per_company=limit_per_company,
+        max_companies=len(WorkdayDiscovery.KNOWN_TENANTS),
+    )
+    return [_scraped_to_dict(j) for j in scraped]
+
+
+async def _scrape_top_companies_task(
+    keywords: List[str],
+    limit_per_company: int,
+    company_filter: Optional[List[str]],
+) -> None:
+    """Background task: scrape top Workday companies and store results."""
+    from app.services.embeddings import embed_text
+    from app.services.vector_store import store_jobs_batch, get_all_jobs
+
+    scraped = await WorkdayDiscovery.scrape_all_known_companies(
+        keywords=keywords,
+        limit_per_company=limit_per_company,
+        max_companies=len(WorkdayDiscovery.KNOWN_TENANTS),
+    )
+    jobs = [_scraped_to_dict(j) for j in scraped]
+
+    if not jobs:
+        return
+
+    existing = get_all_jobs(limit=5000)
+    existing_keys = {
+        (j.get("title", "").lower().strip(), j.get("company", "").lower().strip())
+        for j in existing
+    }
+    new_jobs = [
+        j for j in jobs
+        if (j["title"].lower().strip(), j["company"].lower().strip()) not in existing_keys
+    ]
+
+    if not new_jobs:
+        return
+
+    batch_size = 10
+    for i in range(0, len(new_jobs), batch_size):
+        batch = new_jobs[i:i + batch_size]
+        texts = [
+            f"{j['title']} {j['company']} {j.get('description', '')[:300]}"
+            for j in batch
+        ]
+        embeddings = await asyncio.gather(
+            *[embed_text(t) for t in texts],
+            return_exceptions=True,
+        )
+        valid_batch, vectors = [], []
+        for job, vec in zip(batch, embeddings):
+            if isinstance(vec, list) and len(vec) > 0:
+                valid_batch.append(job)
+                vectors.append(vec)
+        if valid_batch:
+            store_jobs_batch(valid_batch, vectors)
 
 
 # ── Background task ────────────────────────────────────────────────────────
@@ -301,7 +422,6 @@ class DiscoverRequest(BaseModel):
 @router.post("/discover-companies")
 async def discover_companies(
     request: DiscoverRequest,
-    current_user: Dict = Depends(get_current_user),
 ):
     """
     Discover companies hiring for specific roles in given industries.

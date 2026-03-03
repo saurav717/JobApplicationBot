@@ -1,4 +1,12 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Render's fromService injects just the hostname (e.g. applybot-api.onrender.com),
+// so we prepend https:// when no scheme is present.
+function _buildBaseUrl() {
+    const raw = import.meta.env.VITE_API_URL;
+    if (!raw) return 'http://localhost:8000';
+    if (raw.startsWith('http')) return raw;
+    return `https://${raw}`;
+}
+const BASE_URL = _buildBaseUrl();
 
 // ── Auth token helpers ─────────────────────────────────────────────────────
 
@@ -263,5 +271,31 @@ export async function getPlatformStatus(token) {
         headers: _authHeaders(token),
     });
     if (!res.ok) throw new Error(`Platform status failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * List all known top tech companies available for public Workday scraping.
+ */
+export async function getTopCompanies() {
+    const res = await fetch(`${BASE_URL}/api/scraper/top-companies`);
+    if (!res.ok) throw new Error('Failed to fetch companies');
+    return res.json();
+}
+
+/**
+ * Trigger a background scrape of 50+ top tech companies via their public Workday portals.
+ */
+export async function scrapeTopCompanies(keywords = [], companies = null, limitPerCompany = 10) {
+    const res = await fetch(`${BASE_URL}/api/scraper/scrape-top-companies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            keywords: keywords.length > 0 ? keywords : ['software engineer', 'data scientist'],
+            limit_per_company: limitPerCompany,
+            companies,
+        }),
+    });
+    if (!res.ok) throw new Error('Failed to trigger top-companies scrape');
     return res.json();
 }
