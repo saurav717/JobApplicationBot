@@ -1,4 +1,12 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Render's fromService injects just the hostname (e.g. applybot-api.onrender.com),
+// so we prepend https:// when no scheme is present.
+function _buildBaseUrl() {
+    const raw = import.meta.env.VITE_API_URL;
+    if (!raw) return 'http://localhost:8000';
+    if (raw.startsWith('http')) return raw;
+    return `https://${raw}`;
+}
+const BASE_URL = _buildBaseUrl();
 
 // ── Auth token helpers ─────────────────────────────────────────────────────
 
