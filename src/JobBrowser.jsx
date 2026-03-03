@@ -7,7 +7,7 @@ import {
     SlidersHorizontal, Briefcase, RefreshCw, GraduationCap, DollarSign,
     Shield, RotateCcw
 } from 'lucide-react';
-import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, triggerMultiPlatformScrape, getUserScrapeStatus, getStoredToken, getStoredUser, scrapeTopCompanies } from './api';
+import { searchJobsGrouped, generateForm, triggerResumeTargetedScrape, getScraperStatus, scrapeTopCompanies } from './api';
 import SourceBadge from './components/Jobs/SourceBadge';
 import ScrapeProgressBar from './components/Jobs/ScrapeProgressBar';
 import PlatformFilter from './components/Jobs/PlatformFilter';
@@ -63,45 +63,10 @@ export default function JobBrowser({ resumeId, resumeName, onBack }) {
 
     // Platform filter state
     const [selectedPlatforms, setSelectedPlatforms] = useState([]);
-    const [multiScrapeStatus, setMultiScrapeStatus] = useState(null);
-
-    // Auth (for multi-platform scrape)
-    const authToken = getStoredToken();
-    const authUser = getStoredUser();
-
-    // Multi-platform refresh (uses stored credentials when available)
-    const refreshJobsMultiPlatform = async () => {
-        if (isRefreshing || loadingJobs || !authToken || !authUser) return;
-        setIsRefreshing(true);
-        setMultiScrapeStatus({ status: 'running', platforms_active: ['arbeitnow', 'remotive', 'remoteok', 'jobicy', 'himalayas', 'findwork'], jobs_found: 0, jobs_stored: 0, errors: [] });
-        try {
-            await triggerMultiPlatformScrape({}, authToken);
-            const maxWait = 120000;
-            const pollInterval = 5000;
-            let elapsed = 0;
-            while (elapsed < maxWait) {
-                await new Promise(r => setTimeout(r, pollInterval));
-                elapsed += pollInterval;
-                try {
-                    const s = await getUserScrapeStatus(authUser.id, authToken);
-                    setMultiScrapeStatus(s);
-                    if (s.status === 'complete' || s.status === 'error') break;
-                } catch (_) {}
-            }
-        } catch (e) {
-            console.warn('Multi-platform scrape failed:', e);
-        }
-        await loadJobs();
-        setIsRefreshing(false);
-    };
 
     // Refresh: trigger targeted scrape, poll until status updates, then reload jobs
     const refreshJobs = async () => {
         if (isRefreshing || loadingJobs) return;
-        // Use multi-platform scrape if user is authenticated
-        if (authToken && authUser) {
-            return refreshJobsMultiPlatform();
-        }
         setIsRefreshing(true);
         const prevLastRun = scraperStatus?.last_run || 'Never';
         try {
